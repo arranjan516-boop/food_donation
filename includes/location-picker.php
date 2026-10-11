@@ -1,11 +1,7 @@
 <?php
 // includes/location-picker.php
 // Reusable location picker: GPS + Map (OpenStreetMap + Nominatim).
-// Usage: include this file where you want the picker to appear,
-// then call render_location_picker() with the field prefix you use.
-//
-// Requires: $old array with keys city, area, pincode, latitude, longitude
-//           (or pass them explicitly).
+// Usage: include this file, then call render_location_picker($old);
 
 function render_location_picker($old = [], $prefix = '') {
     $city    = htmlspecialchars($old['city']    ?? '', ENT_QUOTES);
@@ -23,13 +19,13 @@ function render_location_picker($old = [], $prefix = '') {
             <button type="button" class="btn btn-outline btn-sm" onclick="lpOpenMap('<?= $uid ?>')">
                 🗺️ Pick location on map
             </button>
-            <span class="text-muted" id="lp-status-<?= $uid ?>"></span>
+            <span class="text-muted" id="lp-status-<?= $uid ?>" style="margin-left:8px;font-size:13px"></span>
         </div>
 
-        <div class="lp-map-wrap" id="lp-map-wrap-<?= $uid ?>" style="display:none">
-            <div id="lp-map-<?= $uid ?>" class="lp-map"></div>
+        <div class="lp-map-wrap" id="lp-map-wrap-<?= $uid ?>" style="display:none;margin-top:12px">
+            <div id="lp-map-<?= $uid ?>" style="width:100%;height:340px;border-radius:12px;background:#eef"></div>
             <p class="text-muted" style="font-size:12px;margin-top:6px">
-                🖱️ Click anywhere on the map to drop the pin. Drag the pin to fine-tune.
+                🖱️ Click anywhere on the map to drop the pin, or drag the pin to fine-tune.
             </p>
         </div>
 
@@ -38,122 +34,189 @@ function render_location_picker($old = [], $prefix = '') {
     </div>
 
     <script>
-    // ---- Only run this bootstrap once per page ----
-    if (typeof window.lpInit === 'undefined') {
-        window.lpRegistry = {};
-        window.lpInit = true;
+    // ---- Load Leaflet once ----
+    (function() {
+        if (!document.getElementById('leaflet-css')) {
+            var l = document.createElement('link');
+            l.id = 'leaflet-css';
+            l.rel = 'stylesheet';
+            l.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+            document.head.appendChild(l);
+        }
+        if (!document.getElementById('leaflet-js')) {
+            var s = document.createElement('script');
+            s.id = 'leaflet-js';
+            s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+            document.head.appendChild(s);
+        }
+    })();
 
-        // Load Leaflet CSS + JS once
-        (function() {
-            if (!document.getElementById('leaflet-css')) {
-                var l = document.createElement('link');
-                l.id = 'leaflet-css';
-                l.rel = 'stylesheet';
-                l.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-                document.head.appendChild(l);
-            }
-            if (!document.getElementById('leaflet-js')) {
-                var s = document.createElement('script');
-                s.id = 'leaflet-js';
-                s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-                s.defer = true;
-                document.head.appendChild(s);
-            }
-        })();
-    }
+    window.lpMaps = window.lpMaps || {};
+    window.lpMarkers = window.lpMarkers || {};
 
-    // ---- GPS reverse geocoding ----
+    // ============================================================
+    // 1. USE MY CURRENT LOCATION
+    // ============================================================
     function lpUseGPS(uid) {
         var status = document.getElementById('lp-status-' + uid);
-        if (!navigator.geolocation) { status.textContent = 'Geolocation not supported'; return; }
-        status.textContent = 'Detecting…';
+        if (!navigator.geolocation) {
+            status.textContent = '❌ Geolocation is not supported by this browser.';
+            return;
+        }
+        status.textContent = '📡 Detecting your location…';
         navigator.geolocation.getCurrentPosition(
             function(pos) {
                 var lat = pos.coords.latitude.toFixed(6);
                 var lng = pos.coords.longitude.toFixed(6);
+                var acc = Math.round(pos.coords.accuracy || 0);
+
+                // Set hidden coordinates
                 document.getElementById('lp-lat-' + uid).value = lat;
                 document.getElementById('lp-lng-' + uid).value = lng;
-                status.textContent = '✅ Coordinates captured, looking up city…';
-                lpReverseGeocode(lat, lng, uid);
+
+                status.textContent = '📍 Coordinates captured (accuracy ±' + acc + 'm). Looking up address…';
+
+                // If a map is already open, move its marker to the new coordinates
+                if (window.lpMaps[uid] && window.lpMarkers[uid]) {
+                    window.lpMaps[uid].setView([lat, lng], 16);
+                    window.lpMarkers[uid].setLatLng([lat, lng]);
+                }
+
+                // Reverse geocode and force-update the visible fields
+                lpReverseGeocode(lat, lng, uid, true);
             },
-            function(err) { status.textContent = '⚠️ ' + err.message; },
-            { enableHighAccuracy: true, timeout: 8000 }
+            function(err) {
+                var msg = '❌ Location error';
+                if (err.code === 1) msg = '❌ You denied location permission. Please allow access or pick manually on the map.';
+                else if (err.code === 2) msg = '❌ Location unavailable. Try again or pick manually on the map.';
+                else if (err.code === 3) msg = '❌ Location request timed out. Try again or pick manually on the map.';
+                status.textContent = msg;
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
         );
     }
 
-    // ---- Reverse geocoding via OpenStreetMap Nominatim ----
-    function lpReverseGeocode(lat, lng, uid) {
+    // ============================================================
+    // 2. REVERSE GEOCODE (Nominatim)
+    // ============================================================
+    function lpReverseGeocode(lat, lng, uid, forceOverwrite) {
+        var status = document.getElementById('lp-status-' + uid);
         var url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat +
-                  '&lon=' + lng + '&zoom=14&addressdetails=1';
+                  '&lon=' + lng + '&zoom=18&addressdetails=1';
+
         fetch(url, { headers: { 'Accept': 'application/json' } })
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                if (!data.address) return;
+                if (!data || !data.address) {
+                    if (forceOverwrite) {
+                        status.textContent = '📍 Coordinates captured. Address lookup failed — please fill address fields manually.';
+                    }
+                    return;
+                }
                 var a = data.address;
-                // Try to pick the most sensible city/area
-                var city = a.city || a.town || a.village || a.suburb || a.county || '';
-                var area = a.suburb || a.neighbourhood || a.city_district || a.village || a.hamlet || '';
+
+                // Best-effort extraction of city / town / village
+                var city = a.city || a.town || a.municipality || a.village ||
+                           a.county || a.state_district || a.state || '';
+                // Best-effort extraction of area / suburb / neighbourhood
+                var area = a.suburb || a.neighbourhood || a.quarter ||
+                           a.city_district || a.hamlet || a.village || '';
                 var pin  = a.postcode || '';
+                // Full formatted address
                 var addr = data.display_name || '';
 
-                // Fill the visible fields on the page (best-effort by common names)
-                var cityField = document.querySelector('input[name="city"], #city');
-                var areaField = document.querySelector('input[name="area"], #area');
-                var pinField  = document.querySelector('input[name="pincode"], #pincode');
-                var addrField = document.querySelector('textarea[name="address"], input[name="address"], #address');
+                var cityField = document.getElementById('city')       || document.querySelector('input[name="city"]');
+                var areaField = document.getElementById('area')       || document.querySelector('input[name="area"]');
+                var pinField  = document.getElementById('pincode')    || document.querySelector('input[name="pincode"]');
+                var addrField = document.getElementById('address')    || document.querySelector('textarea[name="address"]');
 
-                if (cityField && !cityField.value) cityField.value = city;
-                if (areaField && !areaField.value) areaField.value = area;
-                if (pinField  && !pinField.value)  pinField.value  = pin;
-                if (addrField && !addrField.value) addrField.value = addr;
-
-                document.getElementById('lp-status-' + uid).textContent = '✅ Location captured';
+                // FORCE overwrite — user clicked the button, they want the update
+                if (forceOverwrite) {
+                    if (cityField && city) cityField.value = city;
+                    if (areaField && area) areaField.value = area;
+                    if (pinField  && pin)  pinField.value  = pin;
+                    if (addrField && addr) addrField.value = addr;
+                    status.textContent = '✅ Location set: ' + (area ? area + ', ' : '') + (city || 'coordinates saved');
+                } else {
+                    // Non-forced: only fill empty fields (map marker moved)
+                    if (cityField && !cityField.value && city) cityField.value = city;
+                    if (areaField && !areaField.value && area) areaField.value = area;
+                    if (pinField  && !pinField.value  && pin)  pinField.value  = pin;
+                    if (addrField && !addrField.value && addr) addrField.value = addr;
+                    status.textContent = '✅ Marker moved to ' + lat + ', ' + lng;
+                }
             })
             .catch(function() {
-                document.getElementById('lp-status-' + uid).textContent = '⚠️ Could not look up city name';
+                if (forceOverwrite) {
+                    status.textContent = '📍 Coordinates captured. Address lookup failed — please fill address fields manually.';
+                }
             });
     }
 
-    // ---- Map picker ----
-    window.lpMaps = window.lpMaps || {};
+    // ============================================================
+    // 3. MAP PICKER
+    // ============================================================
     function lpOpenMap(uid) {
-        document.getElementById('lp-map-wrap-' + uid).style.display = 'block';
+        var wrap = document.getElementById('lp-map-wrap-' + uid);
+        wrap.style.display = 'block';
 
-        // Ensure Leaflet is loaded
+        // If Leaflet hasn't loaded yet, retry in a moment
         if (typeof L === 'undefined') {
             setTimeout(function() { lpOpenMap(uid); }, 200);
             return;
         }
-        if (window.lpMaps[uid]) return;
 
-        var lat = parseFloat(document.getElementById('lp-lat-' + uid).value) || 13.3379; // Tumkur default
-        var lng = parseFloat(document.getElementById('lp-lng-' + uid).value) || 77.1173;
+        // If map already exists, just refresh its size and re-center on latest GPS coords
+        if (window.lpMaps[uid]) {
+            var lat0 = parseFloat(document.getElementById('lp-lat-' + uid).value);
+            var lng0 = parseFloat(document.getElementById('lp-lng-' + uid).value);
+            window.lpMaps[uid].invalidateSize();
+            if (!isNaN(lat0) && !isNaN(lng0) && window.lpMarkers[uid]) {
+                window.lpMaps[uid].setView([lat0, lng0], 15);
+                window.lpMarkers[uid].setLatLng([lat0, lng0]);
+            }
+            return;
+        }
 
-        var map = L.map('lp-map-' + uid).setView([lat, lng], 13);
+        // Initial position: existing coords or a neutral world view
+        var startLat = parseFloat(document.getElementById('lp-lat-' + uid).value);
+        var startLng = parseFloat(document.getElementById('lp-lng-' + uid).value);
+        var hasStart = !isNaN(startLat) && !isNaN(startLng) && startLat !== 0 && startLng !== 0;
+
+        // Neutral default (India center) — will be overwritten if coords exist
+        var center = hasStart ? [startLat, startLng] : [20.5937, 78.9629];
+        var zoom   = hasStart ? 15 : 5;
+
+        var map = L.map('lp-map-' + uid, { scrollWheelZoom: true }).setView(center, zoom);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; OpenStreetMap'
+            attribution: '© OpenStreetMap'
         }).addTo(map);
 
-        var marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+        var marker = L.marker(center, { draggable: true }).addTo(map);
+        window.lpMaps[uid]    = map;
+        window.lpMarkers[uid] = marker;
 
         function apply(lat, lng) {
             document.getElementById('lp-lat-' + uid).value = lat.toFixed(6);
             document.getElementById('lp-lng-' + uid).value = lng.toFixed(6);
-            lpReverseGeocode(lat.toFixed(6), lng.toFixed(6), uid);
+            lpReverseGeocode(lat.toFixed(6), lng.toFixed(6), uid, true);
         }
 
+        // Marker drag → update coords + address
         marker.on('dragend', function() {
             var p = marker.getLatLng();
             apply(p.lat, p.lng);
         });
 
+        // Map click → move marker and update coords + address
         map.on('click', function(e) {
             marker.setLatLng(e.latlng);
             apply(e.latlng.lat, e.latlng.lng);
         });
 
-        window.lpMaps[uid] = map;
+        // Leaflet sometimes needs a size refresh after the container becomes visible
+        setTimeout(function() { map.invalidateSize(); }, 200);
     }
     </script>
     <?php
