@@ -29,6 +29,23 @@ $stmt->execute([':n' => $nrId, ':u' => $uid]);
 $r = $stmt->fetch();
 if (!$r) { set_flash('error', 'Record not found.'); redirect(BASE_URL . 'ngo/my-donations.php'); }
 
+// Find the accepted recipient request for this donation
+$recipient = null;
+try {
+    $rq = $pdo->prepare("
+        SELECT fr.*, u.name AS recipient_name, u.phone AS recipient_phone, u.email AS recipient_email,
+               u.address AS recipient_address, u.city AS recipient_city,
+               u.area AS recipient_area, u.pincode AS recipient_pincode,
+               u.latitude AS recipient_lat, u.longitude AS recipient_lng
+        FROM food_requests fr
+        JOIN users u ON u.user_id = fr.recipient_id
+        WHERE fr.donation_id = :d AND fr.status = 'accepted'
+        ORDER BY fr.accepted_at DESC LIMIT 1
+    ");
+    $rq->execute([':d' => $r['donation_id']]);
+    $recipient = $rq->fetch();
+} catch (Exception $e) { /* silent */ }
+
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -46,7 +63,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                        VALUES (:d, 'ngo_assigned', 'picked_up', :u)")
             ->execute([':d' => $r['donation_id'], ':u' => $uid]);
 
-        // Notify the donor (donor_id is now selected)
         notify($pdo, (int)$r['donor_id'], '🍱 Food Collected',
             'Your donation "' . $r['food_name'] . '" has been collected by ' . current_user()['name'] . '.',
             'ngo', $r['donation_id']);
@@ -64,6 +80,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="toast toast-error"><?php foreach ($errors as $e): ?><?= sanitize($e) ?><br><?php endforeach; ?></div>
 <?php endif; ?>
 
+<!-- Pickup info -->
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($r['food_name']) ?></h2>
@@ -76,13 +93,48 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
             <h4>📍 Pickup From</h4>
             <p><strong><?= sanitize($r['donor_name']) ?></strong></p>
             <p><?= sanitize($r['pickup_address']) ?>, <?= sanitize($r['pickup_area']) ?>, <?= sanitize($r['pickup_city']) ?></p>
-            <p><strong>Phone:</strong> <?= sanitize($r['donor_phone'] ?: '—') ?></p>
+            <p><strong>Phone:</strong>
+                <?php if ($r['donor_phone']): ?>
+                    <a href="tel:<?= sanitize($r['donor_phone']) ?>"><?= sanitize($r['donor_phone']) ?></a>
+                <?php else: ?>—<?php endif; ?>
+            </p>
             <p style="margin-top:12px"><strong>Quantity:</strong> <?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></p>
             <p><strong>People served:</strong> <?= (int)$r['people_served'] ?></p>
             <p><strong>Best before:</strong> <?= $r['best_before'] ? date('d M Y, h:i A', strtotime($r['best_before'])) : '—' ?></p>
         </div>
     </div>
 </div>
+
+<!-- Recipient info (delivery target) -->
+<?php if ($recipient): ?>
+<div class="card mb-3" style="border-left:4px solid var(--green);background:#F1F8E9">
+    <h3 class="card-title" style="color:var(--green-dark)">🏁 Deliver To — Recipient Details</h3>
+
+    <div class="recipient-info">
+        <div><strong>Name:</strong> <?= sanitize($recipient['recipient_name']) ?></div>
+        <div><strong>Phone:</strong>
+            <?php if ($recipient['recipient_phone']): ?>
+                <a href="tel:<?= sanitize($recipient['recipient_phone']) ?>"><?= sanitize($recipient['recipient_phone']) ?></a>
+            <?php else: ?>—<?php endif; ?>
+        </div>
+        <div><strong>Email:</strong> <?= sanitize($recipient['recipient_email'] ?: '—') ?></div>
+        <div style="grid-column:1/-1">
+            <strong>Delivery Address:</strong>
+            <?= sanitize($recipient['recipient_address'] ?: '—') ?>
+            <?= $recipient['recipient_area'] ? ', ' . sanitize($recipient['recipient_area']) : '' ?>
+            <?= $recipient['recipient_city']  ? ', ' . sanitize($recipient['recipient_city'])  : '' ?>
+            <?= $recipient['recipient_pincode'] ? ' - ' . sanitize($recipient['recipient_pincode']) : '' ?>
+        </div>
+        <div><strong>Quantity to deliver:</strong> <?= (float)$recipient['quantity'] ?> <?= sanitize($r['unit']) ?></div>
+    </div>
+
+    <?php if ($recipient['recipient_lat'] && $recipient['recipient_lng']): ?>
+        <a class="btn btn-outline btn-sm mt-2"
+           href="https://www.google.com/maps/dir/?api=1&destination=<?= urlencode($recipient['recipient_lat'] . ',' . $recipient['recipient_lng']) ?>"
+           target="_blank">🗺️ Open route in Google Maps</a>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
 
 <div class="card">
     <h3 class="card-title">Collection</h3>
@@ -98,6 +150,10 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 .details-grid { display:grid; grid-template-columns: 260px 1fr; gap:20px; }
 .details-grid img { width:100%; border-radius:12px; }
 @media (max-width: 700px) { .details-grid { grid-template-columns: 1fr; } }
+
+.recipient-info { display:grid; grid-template-columns: 1fr 1fr; gap:10px 24px; font-size:14px; }
+@media (max-width: 600px) { .recipient-info { grid-template-columns: 1fr; } }
+.recipient-info a { color: var(--green-dark); font-weight: 500; }
 </style>
 
 <?php require_once __DIR__ . '/../includes/dashboard-footer.php'; ?>
