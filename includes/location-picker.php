@@ -1,10 +1,13 @@
 <?php
 // includes/location-picker.php
-// Google Maps location picker using PLACES API ONLY (no Geocoding API needed).
+// Hybrid location picker:
+//   - Google Maps for the map + Places Autocomplete (visual + search)
+//   - OpenStreetMap Nominatim for reverse geocoding (free, no quota, always works)
+//
 // Requires: Google Maps JavaScript API + Places API enabled on the key.
 
 if (!defined('GOOGLE_MAPS_KEY')) {
-    define('GOOGLE_MAPS_KEY', 'AIzaSyAFG9DP2R9rNYiwzI5zcJJy1kPekHAz5nY');
+    define('GOOGLE_MAPS_KEY', 'PASTE_YOUR_DEMO_KEY_HERE');
 }
 
 function render_location_picker($old = [], $prefix = '') {
@@ -17,10 +20,10 @@ function render_location_picker($old = [], $prefix = '') {
     ?>
     <div class="location-picker" id="lp-<?= $uid ?>">
         <div class="lp-buttons">
-            <button type="button" class="btn btn-outline btn-sm" onclick="gmUseGPS('<?= $uid ?>')">
+            <button type="button" class="btn btn-outline btn-sm" onclick="lpUseGPS('<?= $uid ?>')">
                 📍 Use my current location
             </button>
-            <button type="button" class="btn btn-outline btn-sm" onclick="gmOpenMap('<?= $uid ?>')">
+            <button type="button" class="btn btn-outline btn-sm" onclick="lpOpenMap('<?= $uid ?>')">
                 🗺️ Pick location on map
             </button>
             <span class="text-muted" id="lp-status-<?= $uid ?>" style="margin-left:8px;font-size:13px"></span>
@@ -41,38 +44,127 @@ function render_location_picker($old = [], $prefix = '') {
     </div>
 
     <script>
-    window.gmMaps    = window.gmMaps    || {};
-    window.gmMarkers = window.gmMarkers || {};
-    window.gmPlaces  = window.gmPlaces  || {};
-    window.gmAutocomplete = window.gmAutocomplete || {};
+    // ---- Global registries (shared across multiple pickers) ----
+    window.lpMaps         = window.lpMaps         || {};
+    window.lpMarkers      = window.lpMarkers      || {};
+    window.lpPlaces       = window.lpPlaces       || {};
+    window.lpAutocomplete = window.lpAutocomplete || {};
 
     // ---- Load Google Maps JS once ----
     (function() {
-        if (window.gmLoaded) return;
-        window.gmLoaded = true;
-        window.gmReadyCallbacks = [];
+        if (window.lpLoaded) return;
+        window.lpLoaded = true;
+        window.lpReadyCallbacks = [];
 
         var s = document.createElement('script');
-        s.src = 'https://maps.googleapis.com/maps/api/js?key=<?= GOOGLE_MAPS_KEY ?>&libraries=places&callback=gmReady';
+        s.src = 'https://maps.googleapis.com/maps/api/js?key=<?= GOOGLE_MAPS_KEY ?>&libraries=places&callback=lpReady';
         s.async = true;
         s.defer = true;
         document.head.appendChild(s);
 
-        window.gmReady = function() {
-            window.gmReadyCallbacks.forEach(function(cb) { cb(); });
-            window.gmReadyCallbacks = [];
+        window.lpReady = function() {
+            window.lpReadyCallbacks.forEach(function(cb) { cb(); });
+            window.lpReadyCallbacks = [];
         };
     })();
 
-    function gmOnReady(cb) {
-        if (window.google && google.maps && google.maps.places) cb();
-        else window.gmReadyCallbacks.push(cb);
+    function lpOnReady(cb) {
+        if (window.google && google.maps) cb();
+        else window.lpReadyCallbacks.push(cb);
     }
 
-    // ============================================================
+    // ================================================================
+    // CORE: reverse geocode using OpenStreetMap Nominatim (always works)
+    // ================================================================
+    function lpReverseGeocode(lat, lng, uid, forceOverwrite) {
+        var status = document.getElementById('lp-status-' + uid);
+        var url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' +
+                  encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng) +
+                  '&zoom=18&addressdetails=1&accept-language=en';
+
+        fetch(url, { headers: { 'Accept': 'application/json' } })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data || !data.address) {
+                    if (forceOverwrite) {
+                        status.textContent = '📍 Coordinates saved. Address lookup failed — please fill fields manually.';
+                    }
+                    return;
+                }
+                lpApplyNominatim(data, uid, forceOverwrite);
+            })
+            .catch(function() {
+                if (forceOverwrite) {
+                    status.textContent = '📍 Coordinates saved. Network issue — please fill fields manually.';
+                }
+            });
+    }
+
+    function lpApplyNominatim(data, uid, forceOverwrite) {
+        var status = document.getElementById('lp-status-' + uid);
+        var a = data.address;
+
+        // ---- CITY ----
+        var city = a.city || a.town || a.municipality || a.village ||
+                   a.county || a.state_district || '';
+
+        // ---- AREA (wide fallback chain for India) ----
+        var area = a.suburb || a.neighbourhood || a.quarter || a.residential ||
+                   a.hamlet || a.village || a.city_district || a.district || '';
+
+        // If still empty, try parsing display_name:
+        // Typical: "Road, Area, City, District, State, Pincode, Country"
+        if (!area && data.display_name) {
+            var parts = data.display_name.split(',').map(function(x) { return x.trim(); });
+            for (var i = 1; i < Math.min(parts.length, 4); i++) {
+                var candidate = parts[i];
+                if (candidate && !/^\d+$/.test(candidate) && candidate !== city) {
+                    area = candidate;
+                    break;
+                }
+            }
+        }
+
+        // If AREA still empty, use road name as last resort
+        if (!area && a.road) area = a.road;
+
+        // ---- PINCODE ----
+        var pin = a.postcode || '';
+
+        // ---- FULL ADDRESS ----
+        var addr = data.display_name || '';
+
+        // If city is missing but pincode exists, try to infer city from address parts
+        if (!city && parts && parts.length >= 3) {
+            city = parts[2] || '';
+        }
+
+        var cityField = document.getElementById('city')    || document.querySelector('input[name="city"]');
+        var areaField = document.getElementById('area')    || document.querySelector('input[name="area"]');
+        var pinField  = document.getElementById('pincode') || document.querySelector('input[name="pincode"]');
+        var addrField = document.getElementById('address') || document.querySelector('textarea[name="address"]');
+
+        if (forceOverwrite) {
+            if (cityField && city) cityField.value = city;
+            if (areaField && area) areaField.value = area;
+            if (pinField  && pin)  pinField.value  = pin;
+            if (addrField && addr) addrField.value = addr;
+
+            var label = (area ? area : '') + (city ? ', ' + city : '');
+            status.textContent = '✅ Location set: ' + (label || (lat + ', ' + lng));
+        } else {
+            if (cityField && !cityField.value && city) cityField.value = city;
+            if (areaField && !areaField.value && area) areaField.value = area;
+            if (pinField  && !pinField.value  && pin)  pinField.value  = pin;
+            if (addrField && !addrField.value && addr) addrField.value = addr;
+            status.textContent = '✅ Marker moved';
+        }
+    }
+
+    // ================================================================
     // 1. USE MY CURRENT LOCATION
-    // ============================================================
-    function gmUseGPS(uid) {
+    // ================================================================
+    function lpUseGPS(uid) {
         var status = document.getElementById('lp-status-' + uid);
         if (!navigator.geolocation) {
             status.textContent = '❌ Geolocation not supported by this browser.';
@@ -96,16 +188,17 @@ function render_location_picker($old = [], $prefix = '') {
                 document.getElementById('lp-lat-' + uid).value = lat;
                 document.getElementById('lp-lng-' + uid).value = lng;
 
-                status.textContent = '📍 Coordinates captured (±' + acc + 'm). Looking up area…';
+                status.textContent = '📍 Coordinates captured (±' + acc + 'm). Looking up address…';
 
-                if (window.gmMaps[uid] && window.gmMarkers[uid]) {
+                // If map is open, re-center + zoom in
+                if (window.lpMaps[uid] && window.lpMarkers[uid]) {
                     var posObj = { lat: parseFloat(lat), lng: parseFloat(lng) };
-                    window.gmMaps[uid].setCenter(posObj);
-                    window.gmMaps[uid].setZoom(17);
-                    window.gmMarkers[uid].setPosition(posObj);
+                    window.lpMaps[uid].setCenter(posObj);
+                    window.lpMaps[uid].setZoom(17);
+                    window.lpMarkers[uid].setPosition(posObj);
                 }
 
-                gmLookupAddress(lat, lng, uid, true);
+                lpReverseGeocode(lat, lng, uid, true);
             },
             function(err) {
                 clearInterval(tick);
@@ -119,146 +212,23 @@ function render_location_picker($old = [], $prefix = '') {
         );
     }
 
-    // ============================================================
-    // 2. ADDRESS LOOKUP — PLACES API (no Geocoding API needed)
-    // ============================================================
-    function gmLookupAddress(lat, lng, uid, forceOverwrite) {
-        gmOnReady(function() {
-            var status = document.getElementById('lp-status-' + uid);
-
-            // Places service needs a map or a div
-            var mapEl = document.getElementById('lp-map-' + uid);
-            if (!mapEl) {
-                status.textContent = '📍 Coordinates captured. Open the map to get the address.';
-                return;
-            }
-
-            // Create a hidden map if one doesn't exist yet (Places service needs it)
-            if (!window.gmMaps[uid]) {
-                window.gmMaps[uid] = new google.maps.Map(mapEl, {
-                    center: { lat: parseFloat(lat), lng: parseFloat(lng) },
-                    zoom: 16,
-                    disableDefaultUI: true
-                });
-            }
-
-            if (!window.gmPlaces[uid]) {
-                window.gmPlaces[uid] = new google.maps.places.PlacesService(window.gmMaps[uid]);
-            }
-
-            var service = window.gmPlaces[uid];
-
-            // --- Strategy 1: nearbySearch around the coordinates ---
-            service.nearbySearch({
-                location: { lat: parseFloat(lat), lng: parseFloat(lng) },
-                radius: 100
-            }, function(results, statusCode) {
-                if (statusCode === google.maps.places.PlacesServiceStatus.OK && results && results.length > 0) {
-                    // Try to enrich with full place details for the closest result
-                    service.getDetails({
-                        placeId: results[0].place_id,
-                        fields: ['address_components', 'formatted_address', 'name', 'vicinity']
-                    }, function(place, detailStatus) {
-                        if (detailStatus === google.maps.places.PlacesServiceStatus.OK && place && place.address_components) {
-                            applyAddressComponents(place.address_components, place.formatted_address, uid, forceOverwrite);
-                        } else {
-                            // Fallback to basic info from nearbySearch
-                            fallbackFromNearby(results, uid, forceOverwrite);
-                        }
-                    });
-                } else {
-                    // --- Strategy 2: no nearby place found — ask user to type manually ---
-                    fallbackFromNearby(null, uid, forceOverwrite);
-                }
-            });
-        });
-    }
-
-    function applyAddressComponents(comps, formattedAddr, uid, forceOverwrite) {
-        var status = document.getElementById('lp-status-' + uid);
-        var city = '', area = '', pin = '';
-
-        // Same priority mapping as Google Geocoding
-        for (var i = 0; i < comps.length; i++) {
-            var c = comps[i];
-            var types = c.types;
-
-            if (!area && types.indexOf('sublocality_level_1') !== -1) area = c.long_name;
-            if (!area && types.indexOf('sublocality') !== -1)         area = c.long_name;
-            if (!area && types.indexOf('neighborhood') !== -1)        area = c.long_name;
-
-            if (!city && types.indexOf('locality') !== -1)            city = c.long_name;
-            if (!city && types.indexOf('administrative_area_level_2') !== -1) city = c.long_name;
-
-            if (!pin && types.indexOf('postal_code') !== -1)          pin = c.long_name;
-        }
-
-        if (!area && city) area = city;
-
-        var cityField = document.getElementById('city')    || document.querySelector('input[name="city"]');
-        var areaField = document.getElementById('area')    || document.querySelector('input[name="area"]');
-        var pinField  = document.getElementById('pincode') || document.querySelector('input[name="pincode"]');
-        var addrField = document.getElementById('address') || document.querySelector('textarea[name="address"]');
-
-        if (forceOverwrite) {
-            if (cityField && city) cityField.value = city;
-            if (areaField && area) areaField.value = area;
-            if (pinField  && pin)  pinField.value  = pin;
-            if (addrField && formattedAddr) addrField.value = formattedAddr;
-            status.textContent = '✅ Location set: ' + (area ? area + ', ' : '') + (city || '');
-        } else {
-            if (cityField && !cityField.value && city) cityField.value = city;
-            if (areaField && !areaField.value && area) areaField.value = area;
-            if (pinField  && !pinField.value  && pin)  pinField.value  = pin;
-            if (addrField && !addrField.value && formattedAddr) addrField.value = formattedAddr;
-            status.textContent = '✅ Marker moved';
-        }
-    }
-
-    function fallbackFromNearby(results, uid, forceOverwrite) {
-        var status = document.getElementById('lp-status-' + uid);
-        var cityField = document.getElementById('city') || document.querySelector('input[name="city"]');
-        var areaField = document.getElementById('area') || document.querySelector('input[name="area"]');
-        var addrField = document.getElementById('address') || document.querySelector('textarea[name="address"]');
-
-        if (results && results.length > 0) {
-            var place = results[0];
-            var guessArea = place.name || place.vicinity || '';
-            var guessCity = '';
-
-            // Try to extract city from vicinity string like "Street, Area, City"
-            if (place.vicinity) {
-                var parts = place.vicinity.split(',').map(function(s) { return s.trim(); });
-                if (parts.length >= 2) guessCity = parts[parts.length - 1];
-            }
-
-            if (forceOverwrite) {
-                if (areaField && guessArea) areaField.value = guessArea;
-                if (cityField && guessCity && !cityField.value) cityField.value = guessCity;
-                if (addrField && place.vicinity && !addrField.value) addrField.value = place.vicinity;
-            }
-            status.textContent = '⚠️ Nearby: "' + guessArea + '". Please verify the city and pincode fields.';
-        } else {
-            status.textContent = '📍 Coordinates captured. No landmarks nearby — please type area, city and pincode.';
-        }
-    }
-
-    // ============================================================
-    // 3. MAP PICKER
-    // ============================================================
-    function gmOpenMap(uid) {
+    // ================================================================
+    // 2. MAP PICKER (Google Map + Places Autocomplete + Nominatim)
+    // ================================================================
+    function lpOpenMap(uid) {
         var wrap = document.getElementById('lp-map-wrap-' + uid);
         wrap.style.display = 'block';
 
-        gmOnReady(function() {
-            if (window.gmMaps[uid]) {
+        lpOnReady(function() {
+            // If map already exists, refresh + recenter
+            if (window.lpMaps[uid]) {
                 var lat0 = parseFloat(document.getElementById('lp-lat-' + uid).value);
                 var lng0 = parseFloat(document.getElementById('lp-lng-' + uid).value);
-                if (!isNaN(lat0) && !isNaN(lng0) && window.gmMarkers[uid]) {
+                if (!isNaN(lat0) && !isNaN(lng0) && window.lpMarkers[uid]) {
                     var p = { lat: lat0, lng: lng0 };
-                    window.gmMaps[uid].setCenter(p);
-                    window.gmMaps[uid].setZoom(17);
-                    window.gmMarkers[uid].setPosition(p);
+                    window.lpMaps[uid].setCenter(p);
+                    window.lpMaps[uid].setZoom(17);
+                    window.lpMarkers[uid].setPosition(p);
                 }
                 return;
             }
@@ -267,7 +237,7 @@ function render_location_picker($old = [], $prefix = '') {
             var startLng = parseFloat(document.getElementById('lp-lng-' + uid).value);
             var hasStart = !isNaN(startLat) && !isNaN(startLng) && startLat !== 0 && startLng !== 0;
 
-            function initGoogleMap(lat, lng, zoom) {
+            function initMap(lat, lng, zoom) {
                 var map = new google.maps.Map(document.getElementById('lp-map-' + uid), {
                     center: { lat: lat, lng: lng },
                     zoom: zoom,
@@ -283,33 +253,38 @@ function render_location_picker($old = [], $prefix = '') {
                     animation: google.maps.Animation.DROP
                 });
 
-                window.gmMaps[uid]    = map;
-                window.gmMarkers[uid] = marker;
-                window.gmPlaces[uid]  = new google.maps.places.PlacesService(map);
+                window.lpMaps[uid]    = map;
+                window.lpMarkers[uid] = marker;
 
                 function apply(lat, lng) {
                     document.getElementById('lp-lat-' + uid).value = lat.toFixed(6);
                     document.getElementById('lp-lng-' + uid).value = lng.toFixed(6);
-                    gmLookupAddress(lat.toFixed(6), lng.toFixed(6), uid, true);
+                    lpReverseGeocode(lat.toFixed(6), lng.toFixed(6), uid, true);
                 }
 
+                // Marker drag
                 marker.addListener('dragend', function(e) {
                     apply(e.latLng.lat(), e.latLng.lng());
                 });
 
+                // Map click
                 map.addListener('click', function(e) {
                     marker.setPosition(e.latLng);
                     apply(e.latLng.lat(), e.latLng.lng());
                 });
 
-                // Places autocomplete on the search box
+                // Save coordinates immediately (so form always has them)
+                document.getElementById('lp-lat-' + uid).value = lat.toFixed(6);
+                document.getElementById('lp-lng-' + uid).value = lng.toFixed(6);
+
+                // ---- Places Autocomplete on the search box ----
                 var searchBox = document.getElementById('lp-search-' + uid);
                 if (searchBox && google.maps.places) {
                     var ac = new google.maps.places.Autocomplete(searchBox, {
                         componentRestrictions: { country: 'in' },
-                        fields: ['geometry', 'formatted_address', 'address_components']
+                        fields: ['geometry', 'formatted_address', 'address_components', 'name']
                     });
-                    window.gmAutocomplete[uid] = ac;
+                    window.lpAutocomplete[uid] = ac;
 
                     ac.addListener('place_changed', function() {
                         var place = ac.getPlace();
@@ -322,18 +297,19 @@ function render_location_picker($old = [], $prefix = '') {
                         document.getElementById('lp-lat-' + uid).value = lat.toFixed(6);
                         document.getElementById('lp-lng-' + uid).value = lng.toFixed(6);
 
-                        // If the autocomplete returned address_components, use them directly
+                        // Use the autocomplete result's address components directly (they're accurate)
                         if (place.address_components) {
-                            applyAddressComponents(place.address_components, place.formatted_address, uid, true);
+                            lpApplyGoogleComponents(place.address_components, place.formatted_address, uid);
                         } else {
-                            gmLookupAddress(lat.toFixed(6), lng.toFixed(6), uid, true);
+                            lpReverseGeocode(lat.toFixed(6), lng.toFixed(6), uid, true);
                         }
                     });
                 }
             }
 
+            // Determine starting position
             if (hasStart) {
-                initGoogleMap(startLat, startLng, 17);
+                initMap(startLat, startLng, 17);
             } else if (navigator.geolocation) {
                 var status = document.getElementById('lp-status-' + uid);
                 status.textContent = '📡 Getting your location to center the map…';
@@ -343,20 +319,55 @@ function render_location_picker($old = [], $prefix = '') {
                         var lng = parseFloat(pos.coords.longitude.toFixed(6));
                         document.getElementById('lp-lat-' + uid).value = lat;
                         document.getElementById('lp-lng-' + uid).value = lng;
-                        initGoogleMap(lat, lng, 17);
+                        initMap(lat, lng, 17);
                         status.textContent = '📍 Map centered on your location.';
                     },
                     function() {
-                        initGoogleMap(13.3379, 77.1173, 14); // Tumkur fallback
+                        initMap(13.3379, 77.1173, 14); // Tumkur fallback
                         var status = document.getElementById('lp-status-' + uid);
                         status.textContent = '⚠️ No GPS. Search above or click on the map.';
                     },
                     { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
                 );
             } else {
-                initGoogleMap(13.3379, 77.1173, 14); // Tumkur fallback
+                initMap(13.3379, 77.1173, 14); // Tumkur fallback
             }
         });
+    }
+
+    // ================================================================
+    // Apply Google's address_components (used by autocomplete)
+    // ================================================================
+    function lpApplyGoogleComponents(comps, formattedAddr, uid) {
+        var status = document.getElementById('lp-status-' + uid);
+        var city = '', area = '', pin = '';
+
+        for (var i = 0; i < comps.length; i++) {
+            var c = comps[i];
+            var types = c.types;
+
+            if (!area && types.indexOf('sublocality_level_1') !== -1) area = c.long_name;
+            if (!area && types.indexOf('sublocality') !== -1)         area = c.long_name;
+            if (!area && types.indexOf('neighborhood') !== -1)        area = c.long_name;
+
+            if (!city && types.indexOf('locality') !== -1)            city = c.long_name;
+            if (!city && types.indexOf('administrative_area_level_2') !== -1) city = c.long_name;
+
+            if (!pin && types.indexOf('postal_code') !== -1)          pin = c.long_name;
+        }
+        if (!area && city) area = city;
+
+        var cityField = document.getElementById('city')    || document.querySelector('input[name="city"]');
+        var areaField = document.getElementById('area')    || document.querySelector('input[name="area"]');
+        var pinField  = document.getElementById('pincode') || document.querySelector('input[name="pincode"]');
+        var addrField = document.getElementById('address') || document.querySelector('textarea[name="address"]');
+
+        if (cityField && city) cityField.value = city;
+        if (areaField && area) areaField.value = area;
+        if (pinField  && pin)  pinField.value  = pin;
+        if (addrField && formattedAddr) addrField.value = formattedAddr;
+
+        status.textContent = '✅ Location set: ' + (area ? area + ', ' : '') + (city || '');
     }
     </script>
     <?php
