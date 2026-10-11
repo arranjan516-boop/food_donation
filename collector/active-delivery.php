@@ -129,4 +129,151 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare("UPDATE collector_tasks SET status='delivered', delivery_time=NOW() WHERE task_id=:t")
                         ->execute([':t' => $taskId]);
 
-                    $pdo->prepare("UPDATE food_donations SET status='delivered' WHERE donation_id=
+                    $pdo->prepare("UPDATE food_donations SET status='delivered' WHERE donation_id=:d")
+                        ->execute([':d' => $t['donation_id']]);
+
+                    $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by)
+                                   VALUES (:d, :old, 'delivered', :u)")
+                        ->execute([':d' => $t['donation_id'], ':old' => $t['status'], ':u' => $uid]);
+
+                    $pdo->commit();
+
+                    notify($pdo, (int)$t['donor_id'], '✅ Food Delivered',
+                        'Your donated food has been delivered successfully. Delivery proof uploaded.',
+                        'delivered', $t['donation_id']);
+
+                    if (!empty($t['recipient_id'])) {
+                        notify($pdo, (int)$t['recipient_id'], '🍱 Food Delivered',
+                            'Your food has been delivered. Delivery proof is available. Please confirm receipt.',
+                            'delivered', $t['donation_id']);
+                    }
+
+                    notify_admins($pdo, '📷 Delivery Proof Uploaded',
+                        'Collector uploaded proof for donation #' . $t['donation_id'],
+                        'proof', $t['donation_id']);
+
+                    set_flash('success', 'Delivery proof submitted!');
+                    redirect(BASE_URL . 'collector/completed-tasks.php');
+
+                } catch (Exception $ex) {
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    $errors[] = 'Upload failed: ' . $ex->getMessage();
+                }
+            }
+        }
+    }
+}
+
+$pageTitle = 'Active Delivery';
+require_once __DIR__ . '/../includes/dashboard-header.php';
+?>
+
+<?php if ($errors): ?>
+    <div class="toast toast-error"><?php foreach ($errors as $e): ?><?= sanitize($e) ?><br><?php endforeach; ?></div>
+<?php endif; ?>
+
+<div class="card mb-3">
+    <div class="flex-between mb-2">
+        <h2><?= sanitize($t['food_name']) ?></h2>
+        <?= status_badge($t['status']) ?>
+    </div>
+
+    <div class="details-grid">
+        <img src="<?= food_photo_url($t['food_photo']) ?>" alt="">
+        <div>
+            <h4 style="margin-bottom:8px">📍 Pickup From</h4>
+            <p><strong><?= sanitize($t['donor_name']) ?></strong></p>
+            <p><?= sanitize($t['pickup_address']) ?>, <?= sanitize($t['pickup_area']) ?>, <?= sanitize($t['pickup_city']) ?></p>
+            <p><strong>Phone:</strong>
+                <?php if ($t['donor_phone']): ?>
+                    <a href="tel:<?= sanitize($t['donor_phone']) ?>"><?= sanitize($t['donor_phone']) ?></a>
+                <?php else: ?>—<?php endif; ?>
+            </p>
+
+            <p style="margin-top:12px"><strong>Quantity:</strong> <?= (float)$t['quantity'] ?> <?= sanitize($t['unit']) ?></p>
+        </div>
+    </div>
+</div>
+
+<!-- Recipient info panel -->
+<?php if (!empty($t['recipient_name'])): ?>
+<div class="card mb-3" style="border-left:4px solid var(--green);background:#F1F8E9">
+    <h3 class="card-title" style="color:var(--green-dark)">🏁 Deliver To — Recipient Details</h3>
+
+    <div class="recipient-info">
+        <div><strong>Name:</strong> <?= sanitize($t['recipient_name']) ?></div>
+        <div><strong>Phone:</strong>
+            <?php $rp = $t['recipient_phone'] ?: $t['recipient_contact']; ?>
+            <?php if ($rp): ?>
+                <a href="tel:<?= sanitize($rp) ?>"><?= sanitize($rp) ?></a>
+            <?php else: ?>—<?php endif; ?>
+        </div>
+        <div><strong>Email:</strong> <?= sanitize($t['recipient_email'] ?: '—') ?></div>
+        <div style="grid-column:1/-1">
+            <strong>Delivery Address:</strong>
+            <?php
+                $addr = $t['recipient_delivery_address'] ?: $t['recipient_address'];
+                echo sanitize($addr ?: '—');
+            ?>
+            <?= $t['recipient_area'] ? ', ' . sanitize($t['recipient_area']) : '' ?>
+            <?= $t['recipient_city'] ? ', ' . sanitize($t['recipient_city']) : '' ?>
+            <?= $t['recipient_pincode'] ? ' - ' . sanitize($t['recipient_pincode']) : '' ?>
+        </div>
+    </div>
+
+    <?php if ($t['recipient_lat'] && $t['recipient_lng']): ?>
+        <a class="btn btn-outline btn-sm mt-2"
+           href="https://www.google.com/maps/dir/?api=1&destination=<?= urlencode($t['recipient_lat'] . ',' . $t['recipient_lng']) ?>"
+           target="_blank">🗺️ Open route in Google Maps</a>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
+
+<?php if (isset($statusFlow[$t['status']])): ?>
+    <div class="card mb-3">
+        <h3 class="card-title">Next Step</h3>
+        <form method="post">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="advance">
+            <button class="btn btn-primary btn-lg"><?= $statusFlow[$t['status']][1] ?></button>
+        </form>
+    </div>
+<?php endif; ?>
+
+<?php if (in_array($t['status'], ['delivering','awaiting_proof'], true)): ?>
+    <div class="card">
+        <h3 class="card-title">📷 Upload Delivery Proof</h3>
+        <p class="text-muted mb-2">Mandatory — take a photo of the food being handed over.</p>
+
+        <form method="post" enctype="multipart/form-data">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="upload_proof">
+
+            <div class="form-group">
+                <label class="form-label">Delivery Proof Photo *</label>
+                <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp"
+                       onchange="previewImage(this, document.getElementById('proof-preview'))">
+                <img id="proof-preview" style="display:none;max-width:260px;margin-top:10px;border-radius:10px">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Delivery Note (optional)</label>
+                <textarea name="delivery_note" class="form-control" rows="2" placeholder="e.g. Food delivered successfully to the recipient."></textarea>
+            </div>
+
+            <button class="btn btn-primary btn-lg">Submit Delivery Proof</button>
+        </form>
+    </div>
+<?php endif; ?>
+
+<style>
+.details-grid { display:grid; grid-template-columns: 260px 1fr; gap:20px; }
+.details-grid img { width:100%; border-radius:12px; }
+@media (max-width: 700px) { .details-grid { grid-template-columns: 1fr; } }
+
+.recipient-info { display:grid; grid-template-columns: 1fr 1fr; gap:10px 24px; font-size:14px; }
+@media (max-width: 600px) { .recipient-info { grid-template-columns: 1fr; } }
+.recipient-info a { color: var(--green-dark); font-weight: 500; }
+</style>
+
+<?php require_once __DIR__ . '/../includes/dashboard-footer.php'; ?>
