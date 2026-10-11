@@ -2,6 +2,7 @@
 // collector/dashboard.php
 $pageTitle = 'Collector Dashboard';
 require_once __DIR__ . '/../includes/dashboard-header.php';
+require_once __DIR__ . '/../includes/location-functions.php';
 
 if (current_role() !== 'collector' && current_role() !== 'admin') {
     set_flash('error', 'Access denied.');
@@ -27,38 +28,43 @@ $s['accepted_tasks']     = $s['accepted_tasks']     ?? 0;
 $s['active_deliveries']  = $s['active_deliveries']  ?? 0;
 $s['completed_tasks']    = $s['completed_tasks']    ?? 0;
 
-// ---- Nearby available tasks (donations with collector preference) ----
+// ---- Collector's own coordinates ----
 $me = $pdo->prepare("SELECT latitude, longitude FROM users WHERE user_id = :u");
 $me->execute([':u' => $uid]);
 $me = $me->fetch();
-$myLat = $me['latitude']  !== null ? (float)$me['latitude']  : null;
-$myLng = $me['longitude'] !== null ? (float)$me['longitude'] : null;
+$myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['latitude']  : null;
+$myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
+// ---- Nearby available tasks (15 KM filter applied strictly) ----
 $taskSql = "
     SELECT d.*, u.name AS donor_name,
-           (SELECT COUNT(*) FROM collector_tasks ct WHERE ct.donation_id = d.donation_id AND ct.status IN ('accepted','pickup_started','picked_up','delivering')) AS taken
+           (SELECT COUNT(*) FROM collector_tasks ct
+              WHERE ct.donation_id = d.donation_id
+                AND ct.status IN ('accepted','pickup_started','picked_up','delivering','completed')) AS taken
     FROM food_donations d
     JOIN users u ON u.user_id = d.donor_id
-    WHERE d.status IN ('requested','accepted')
+    WHERE d.status IN ('available','requested','accepted')
       AND d.delivery_preference IN ('collector','any')
       AND (d.best_before IS NULL OR d.best_before > NOW())
     ORDER BY d.created_at DESC
-    LIMIT 40
+    LIMIT 200
 ";
-$tasks = $pdo->query($taskSql)->fetchAll();
+$candidates = $pdo->query($taskSql)->fetchAll();
 
-// Filter: only tasks not already taken + within 15 KM
 $nearby = [];
-foreach ($tasks as $t) {
-    if ((int)$t['taken'] > 0) continue;
-    if ($myLat !== null && $t['latitude'] !== null) {
-        $d = haversine_km($myLat, $myLng, (float)$t['latitude'], (float)$t['longitude']);
-        if ($d === null || $d > MATCH_RADIUS_KM) continue;
-        $t['distance_km'] = round($d, 2);
+if ($myLat !== null && $myLng !== null) {
+    foreach ($candidates as $t) {
+        if ((int)$t['taken'] > 0) continue;
+        if ($t['latitude'] === null || $t['longitude'] === null) continue;
+
+        $km = haversine_km($myLat, $myLng, (float)$t['latitude'], (float)$t['longitude']);
+        if ($km === null || $km > MATCH_RADIUS_KM) continue;
+
+        $t['distance_km'] = round($km, 2);
+        $nearby[] = $t;
     }
-    $nearby[] = $t;
+    usort($nearby, fn($a, $b) => $a['distance_km'] <=> $b['distance_km']);
 }
-usort($nearby, fn($a,$b) => ($a['distance_km'] ?? 0) <=> ($b['distance_km'] ?? 0));
 $preview = array_slice($nearby, 0, 4);
 
 // ---- My active tasks ----
@@ -85,6 +91,13 @@ $activeTasks = $active->fetchAll();
     <div class="stat-card"><div class="icon-box purple">🏁</div>
         <div><div class="stat-value"><?= (int)$s['completed_tasks'] ?></div><div class="stat-label">Completed</div></div></div>
 </div>
+
+<?php if ($myLat === null || $myLng === null): ?>
+    <div class="toast toast-info mb-2">
+        📍 Set your <a href="<?= BASE_URL ?>collector/edit-profile.php">location</a>
+        to see pickup tasks within <?= MATCH_RADIUS_KM ?> KM.
+    </div>
+<?php endif; ?>
 
 <div class="flex-between mb-2">
     <h3>Nearby Pickup Tasks <span class="text-muted" style="font-size:14px">(within <?= MATCH_RADIUS_KM ?> KM)</span></h3>
@@ -113,7 +126,7 @@ $activeTasks = $active->fetchAll();
                     </td>
                     <td><?= sanitize($t['donor_name']) ?></td>
                     <td><?= sanitize($t['area'] ?: $t['city']) ?></td>
-                    <td><?= isset($t['distance_km']) ? number_format($t['distance_km'],1).' KM' : '—' ?></td>
+                    <td><span class="badge badge-blue">📍 <?= number_format($t['distance_km'], 1) ?> KM</span></td>
                     <td>
                         <?php
                             $uCls = in_array($t['urgency'], ['urgent','very_urgent']) ? 'badge-red' : 'badge-yellow';
