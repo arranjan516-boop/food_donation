@@ -18,6 +18,8 @@ $stmt = $pdo->prepare("
            d.donation_id, d.donor_id, d.food_name, d.food_photo, d.unit,
            d.quantity, d.people_served,
            d.address AS pickup_address, d.area AS pickup_area, d.city AS pickup_city,
+           d.pincode AS pickup_pincode,
+           d.latitude AS pickup_lat, d.longitude AS pickup_lng,
            d.best_before, d.status AS donation_status,
            u.name AS donor_name, u.phone AS donor_phone
     FROM ngo_requests nr
@@ -29,7 +31,7 @@ $stmt->execute([':n' => $nrId, ':u' => $uid]);
 $r = $stmt->fetch();
 if (!$r) { set_flash('error', 'Record not found.'); redirect(BASE_URL . 'ngo/my-donations.php'); }
 
-// Find the accepted recipient request for this donation
+// Find accepted recipient
 $recipient = null;
 try {
     $rq = $pdo->prepare("
@@ -45,6 +47,31 @@ try {
     $rq->execute([':d' => $r['donation_id']]);
     $recipient = $rq->fetch();
 } catch (Exception $e) { /* silent */ }
+
+// Google Maps URLs
+$donorDestUrl = '';
+if ($r['pickup_lat'] && $r['pickup_lng']) {
+    $donorDestUrl = 'https://www.google.com/maps/dir/?api=1&destination=' .
+        urlencode($r['pickup_lat'] . ',' . $r['pickup_lng']) . '&travelmode=driving';
+} else {
+    $textAddr = trim(($r['pickup_address'] ?? '') . ', ' . ($r['pickup_area'] ?? '') . ', ' . ($r['pickup_city'] ?? '') . ' ' . ($r['pickup_pincode'] ?? ''), ' ,');
+    if ($textAddr) {
+        $donorDestUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($textAddr) . '&travelmode=driving';
+    }
+}
+
+$recipientDestUrl = '';
+if ($recipient) {
+    if ($recipient['recipient_lat'] && $recipient['recipient_lng']) {
+        $recipientDestUrl = 'https://www.google.com/maps/dir/?api=1&destination=' .
+            urlencode($recipient['recipient_lat'] . ',' . $recipient['recipient_lng']) . '&travelmode=driving';
+    } else {
+        $textAddr = trim(($recipient['recipient_address'] ?? '') . ', ' . ($recipient['recipient_area'] ?? '') . ', ' . ($recipient['recipient_city'] ?? '') . ' ' . ($recipient['recipient_pincode'] ?? ''), ' ,');
+        if ($textAddr) {
+            $recipientDestUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($textAddr) . '&travelmode=driving';
+        }
+    }
+}
 
 $errors = [];
 
@@ -80,7 +107,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="toast toast-error"><?php foreach ($errors as $e): ?><?= sanitize($e) ?><br><?php endforeach; ?></div>
 <?php endif; ?>
 
-<!-- Pickup info -->
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($r['food_name']) ?></h2>
@@ -90,22 +116,26 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="details-grid">
         <img src="<?= food_photo_url($r['food_photo']) ?>" alt="">
         <div>
-            <h4>📍 Pickup From</h4>
+            <h4>📍 Pickup From (Donor)</h4>
             <p><strong><?= sanitize($r['donor_name']) ?></strong></p>
-            <p><?= sanitize($r['pickup_address']) ?>, <?= sanitize($r['pickup_area']) ?>, <?= sanitize($r['pickup_city']) ?></p>
+            <p><?= sanitize($r['pickup_address']) ?>, <?= sanitize($r['pickup_area']) ?>, <?= sanitize($r['pickup_city']) ?> - <?= sanitize($r['pickup_pincode']) ?></p>
             <p><strong>Phone:</strong>
                 <?php if ($r['donor_phone']): ?>
                     <a href="tel:<?= sanitize($r['donor_phone']) ?>"><?= sanitize($r['donor_phone']) ?></a>
                 <?php else: ?>—<?php endif; ?>
             </p>
-            <p style="margin-top:12px"><strong>Quantity:</strong> <?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></p>
+            <p><strong>Quantity:</strong> <?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></p>
             <p><strong>People served:</strong> <?= (int)$r['people_served'] ?></p>
-            <p><strong>Best before:</strong> <?= $r['best_before'] ? date('d M Y, h:i A', strtotime($r['best_before'])) : '—' ?></p>
+
+            <?php if ($donorDestUrl): ?>
+                <a href="<?= $donorDestUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">
+                    🧭 Navigate to Donor (Google Maps)
+                </a>
+            <?php endif; ?>
         </div>
     </div>
 </div>
 
-<!-- Recipient info (delivery target) -->
 <?php if ($recipient): ?>
 <div class="card mb-3" style="border-left:4px solid var(--green);background:#F1F8E9">
     <h3 class="card-title" style="color:var(--green-dark)">🏁 Deliver To — Recipient Details</h3>
@@ -125,13 +155,12 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
             <?= $recipient['recipient_city']  ? ', ' . sanitize($recipient['recipient_city'])  : '' ?>
             <?= $recipient['recipient_pincode'] ? ' - ' . sanitize($recipient['recipient_pincode']) : '' ?>
         </div>
-        <div><strong>Quantity to deliver:</strong> <?= (float)$recipient['quantity'] ?> <?= sanitize($r['unit']) ?></div>
     </div>
 
-    <?php if ($recipient['recipient_lat'] && $recipient['recipient_lng']): ?>
-        <a class="btn btn-outline btn-sm mt-2"
-           href="https://www.google.com/maps/dir/?api=1&destination=<?= urlencode($recipient['recipient_lat'] . ',' . $recipient['recipient_lng']) ?>"
-           target="_blank">🗺️ Open route in Google Maps</a>
+    <?php if ($recipientDestUrl): ?>
+        <a href="<?= $recipientDestUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">
+            🧭 Navigate to Recipient (Google Maps)
+        </a>
     <?php endif; ?>
 </div>
 <?php endif; ?>
