@@ -1,5 +1,6 @@
 <?php
 // donor/accept-collector.php
+// PURE ACTION SCRIPT — no HTML.
 // Donor accepts ONE collector OR NGO request.
 // All other pending collector/NGO requests on the same donation are auto-rejected.
 
@@ -21,7 +22,6 @@ if (!in_array($type, ['collector','ngo'], true) || !$reqId) {
     set_flash('error', 'Invalid request.');
     redirect(BASE_URL . 'donor/dashboard.php');
 }
-
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     set_flash('error', 'Please use the Accept button.');
     redirect(BASE_URL . 'donor/dashboard.php');
