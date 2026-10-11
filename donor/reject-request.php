@@ -1,5 +1,7 @@
 <?php
 // donor/reject-request.php
+// PURE ACTION SCRIPT — no HTML.
+
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/notification-functions.php';
@@ -19,12 +21,12 @@ if (!$rid || $_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 verify_csrf();
 
-// Load request + verify ownership
 $sql = "SELECT fr.*, d.donation_id, d.donor_id, d.food_name, d.status AS donation_status
         FROM food_requests fr
         JOIN food_donations d ON d.donation_id = fr.donation_id
         WHERE fr.request_id = :r";
 if (current_role() !== 'admin') $sql .= " AND d.donor_id = :u";
+
 $stmt = $pdo->prepare($sql);
 $params = [':r' => $rid];
 if (current_role() !== 'admin') $params[':u'] = $uid;
