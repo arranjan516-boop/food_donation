@@ -16,7 +16,8 @@ $taskId = int_get('id');
 $stmt = $pdo->prepare("
     SELECT ct.*,
            d.donation_id, d.donor_id, d.food_name, d.food_photo, d.unit, d.quantity, d.people_served,
-           d.address AS pickup_address, d.area AS pickup_area, d.city AS pickup_city,
+           d.address AS pickup_address, d.area AS pickup_area, d.city AS pickup_city, d.pincode AS pickup_pincode,
+           d.latitude AS pickup_lat, d.longitude AS pickup_lng,
            d.best_before, d.urgency,
            u.name AS donor_name, u.phone AS donor_phone,
            fr.request_id, fr.recipient_id, fr.contact_number AS recipient_contact,
@@ -36,6 +37,29 @@ $stmt->execute([':t' => $taskId, ':u' => $uid]);
 $t = $stmt->fetch();
 
 if (!$t) { set_flash('error', 'Task not found.'); redirect(BASE_URL . 'collector/my-tasks.php'); }
+
+// ---- Google Maps navigation URLs ----
+$donorDestUrl = '';
+if ($t['pickup_lat'] && $t['pickup_lng']) {
+    $donorDestUrl = 'https://www.google.com/maps/dir/?api=1&destination=' .
+        urlencode($t['pickup_lat'] . ',' . $t['pickup_lng']) . '&travelmode=driving';
+} else {
+    $donorTextAddr = trim(($t['pickup_address'] ?? '') . ', ' . ($t['pickup_area'] ?? '') . ', ' . ($t['pickup_city'] ?? '') . ' ' . ($t['pickup_pincode'] ?? ''), ' ,');
+    if ($donorTextAddr) {
+        $donorDestUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($donorTextAddr) . '&travelmode=driving';
+    }
+}
+
+$recipientDestUrl = '';
+if ($t['recipient_lat'] && $t['recipient_lng']) {
+    $recipientDestUrl = 'https://www.google.com/maps/dir/?api=1&destination=' .
+        urlencode($t['recipient_lat'] . ',' . $t['recipient_lng']) . '&travelmode=driving';
+} else {
+    $recipientAddr = trim(($t['recipient_delivery_address'] ?: $t['recipient_address']) . ', ' . ($t['recipient_area'] ?? '') . ', ' . ($t['recipient_city'] ?? '') . ' ' . ($t['recipient_pincode'] ?? ''), ' ,');
+    if ($recipientAddr) {
+        $recipientDestUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($recipientAddr) . '&travelmode=driving';
+    }
+}
 
 $errors = [];
 $statusFlow = [
@@ -181,21 +205,25 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="details-grid">
         <img src="<?= food_photo_url($t['food_photo']) ?>" alt="">
         <div>
-            <h4 style="margin-bottom:8px">📍 Pickup From</h4>
+            <h4 style="margin-bottom:8px">📍 Pickup From (Donor)</h4>
             <p><strong><?= sanitize($t['donor_name']) ?></strong></p>
-            <p><?= sanitize($t['pickup_address']) ?>, <?= sanitize($t['pickup_area']) ?>, <?= sanitize($t['pickup_city']) ?></p>
+            <p><?= sanitize($t['pickup_address']) ?>, <?= sanitize($t['pickup_area']) ?>, <?= sanitize($t['pickup_city']) ?> - <?= sanitize($t['pickup_pincode']) ?></p>
             <p><strong>Phone:</strong>
                 <?php if ($t['donor_phone']): ?>
                     <a href="tel:<?= sanitize($t['donor_phone']) ?>"><?= sanitize($t['donor_phone']) ?></a>
                 <?php else: ?>—<?php endif; ?>
             </p>
+            <p><strong>Quantity:</strong> <?= (float)$t['quantity'] ?> <?= sanitize($t['unit']) ?></p>
 
-            <p style="margin-top:12px"><strong>Quantity:</strong> <?= (float)$t['quantity'] ?> <?= sanitize($t['unit']) ?></p>
+            <?php if ($donorDestUrl): ?>
+                <a href="<?= $donorDestUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">
+                    🧭 Navigate to Donor (Google Maps)
+                </a>
+            <?php endif; ?>
         </div>
     </div>
 </div>
 
-<!-- Recipient info panel -->
 <?php if (!empty($t['recipient_name'])): ?>
 <div class="card mb-3" style="border-left:4px solid var(--green);background:#F1F8E9">
     <h3 class="card-title" style="color:var(--green-dark)">🏁 Deliver To — Recipient Details</h3>
@@ -221,10 +249,10 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         </div>
     </div>
 
-    <?php if ($t['recipient_lat'] && $t['recipient_lng']): ?>
-        <a class="btn btn-outline btn-sm mt-2"
-           href="https://www.google.com/maps/dir/?api=1&destination=<?= urlencode($t['recipient_lat'] . ',' . $t['recipient_lng']) ?>"
-           target="_blank">🗺️ Open route in Google Maps</a>
+    <?php if ($recipientDestUrl): ?>
+        <a href="<?= $recipientDestUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">
+            🧭 Navigate to Recipient (Google Maps)
+        </a>
     <?php endif; ?>
 </div>
 <?php endif; ?>
