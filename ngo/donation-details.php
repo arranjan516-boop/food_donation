@@ -2,6 +2,7 @@
 // ngo/donation-details.php
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/location-functions.php';
 require_once __DIR__ . '/../includes/notification-functions.php';
 
 require_login();
@@ -23,7 +24,7 @@ $stmt->execute([':id' => $donationId]);
 $d = $stmt->fetch();
 if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'ngo/available-donations.php'); }
 
-// Existing NGO assignment?
+// Is an NGO already assigned?
 $existing = $pdo->prepare("
     SELECT nr.*, u.name AS ngo_name
     FROM ngo_requests nr
@@ -34,15 +35,22 @@ $existing = $pdo->prepare("
 $existing->execute([':d' => $donationId]);
 $existingNgo = $existing->fetch();
 
+// My own request?
+$mine = $pdo->prepare("SELECT * FROM ngo_requests WHERE donation_id=:d AND ngo_id=:u ORDER BY ngo_request_id DESC LIMIT 1");
+$mine->execute([':d' => $donationId, ':u' => $uid]);
+$myRequest = $mine->fetch();
+
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post('action');
 
-    if ($action === 'accept') {
+    if ($action === 'request_handle') {
         if ($existingNgo) {
-            $errors[] = 'This donation was already accepted by ' . $existingNgo['ngo_name'] . '.';
+            $errors[] = 'This donation was already assigned to ' . $existingNgo['ngo_name'] . '.';
+        } elseif ($myRequest && $myRequest['status'] === 'pending') {
+            $errors[] = 'You already have a pending request.';
         } else {
             try {
                 $pdo->beginTransaction();
@@ -50,44 +58,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lock = $pdo->prepare("SELECT status FROM food_donations WHERE donation_id = :d FOR UPDATE");
                 $lock->execute([':d' => $donationId]);
                 $live = $lock->fetch();
-                if (!$live || !in_array($live['status'], ['available','requested','accepted'])) {
-                    throw new Exception('This donation is no longer available.');
+                if (!$live || $live['status'] !== 'accepted') {
+                    throw new Exception('This donation is not ready for NGO handling yet.');
                 }
 
-                $pdo->prepare("INSERT INTO ngo_requests (donation_id, ngo_id, status, accepted_at)
-                               VALUES (:d, :n, 'accepted', NOW())")
+                $pdo->prepare("INSERT INTO ngo_requests (donation_id, ngo_id, status) VALUES (:d, :n, 'pending')")
                     ->execute([':d' => $donationId, ':n' => $uid]);
-                $ngoReqId = (int)$pdo->lastInsertId();
 
-                $pdo->prepare("UPDATE food_donations SET status='ngo_assigned' WHERE donation_id=:d")
-                    ->execute([':d' => $donationId]);
-
-                $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by)
-                               VALUES (:d, :old, 'ngo_assigned', :u)")
-                    ->execute([':d' => $donationId, ':old' => $live['status'], ':u' => $uid]);
+                notify($pdo, (int)$d['donor_id'], '🏢 New NGO Request',
+                    current_user()['name'] . ' wants to handle "' . $d['food_name'] . '".',
+                    'ngo_request', $donationId);
 
                 $pdo->commit();
 
-                notify($pdo, $d['donor_id'], '🏢 NGO Accepted Donation',
-                    current_user()['name'] . ' will handle "' . $d['food_name'] . '".',
-                    'ngo', $donationId);
-                notify_admins($pdo, '🏢 NGO Accepted Donation',
-                    current_user()['name'] . ' accepted donation #' . $donationId,
-                    'ngo', $donationId);
-
-                set_flash('success', 'Donation accepted!');
-                redirect(BASE_URL . 'ngo/collection-status.php?id=' . $ngoReqId);
+                set_flash('success', 'Request sent to the donor. You will be notified when they accept.');
+                redirect(BASE_URL . 'ngo/my-donations.php');
 
             } catch (Exception $ex) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) $pdo->rollBack();
                 $errors[] = $ex->getMessage();
             }
         }
-    }
-
-    if ($action === 'reject') {
-        set_flash('info', 'Skipped.');
-        redirect(BASE_URL . 'ngo/available-donations.php');
     }
 }
 
@@ -121,30 +112,28 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 
 <?php if ($existingNgo && $existingNgo['ngo_id'] != $uid): ?>
     <div class="card">
-        <div class="toast toast-info">
-            🔒 This donation was already accepted by <?= sanitize($existingNgo['ngo_name']) ?>.
-        </div>
+        <div class="toast toast-info">🔒 This donation was assigned to <?= sanitize($existingNgo['ngo_name']) ?>.</div>
         <a href="<?= BASE_URL ?>ngo/available-donations.php" class="btn btn-outline">← Back</a>
     </div>
-
 <?php elseif ($existingNgo && $existingNgo['ngo_id'] == $uid): ?>
     <div class="card">
-        <div class="toast toast-success">✅ Your NGO has accepted this donation.</div>
+        <div class="toast toast-success">✅ Your NGO has been assigned this donation.</div>
         <a href="<?= BASE_URL ?>ngo/collection-status.php?id=<?= (int)$existingNgo['ngo_request_id'] ?>" class="btn btn-primary">Continue to Collection</a>
     </div>
-
+<?php elseif ($myRequest && $myRequest['status'] === 'pending'): ?>
+    <div class="card">
+        <div class="toast toast-info">⏳ Your request is pending. Waiting for the donor to accept.</div>
+        <a href="<?= BASE_URL ?>ngo/my-donations.php" class="btn btn-outline">← My Donations</a>
+    </div>
 <?php else: ?>
     <div class="card">
-        <h3 class="card-title">Actions</h3>
-        <form method="post" style="display:inline">
+        <h3 class="card-title">Request to Handle</h3>
+        <p class="text-muted">Send a request to the donor. They will choose one collector or NGO.</p>
+        <form method="post">
             <?= csrf_field() ?>
-            <input type="hidden" name="action" value="accept">
-            <button class="btn btn-primary btn-lg" data-confirm="Accept this donation?">✅ Accept Donation</button>
-        </form>
-        <form method="post" style="display:inline;margin-left:8px">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="reject">
-            <button class="btn btn-outline btn-lg">Skip</button>
+            <input type="hidden" name="action" value="request_handle">
+            <button class="btn btn-primary btn-lg" data-confirm="Send a request to handle this donation?">🏢 Request to Handle</button>
+            <a href="<?= BASE_URL ?>ngo/available-donations.php" class="btn btn-outline">Cancel</a>
         </form>
     </div>
 <?php endif; ?>
