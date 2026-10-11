@@ -11,14 +11,14 @@ if (current_role() !== 'collector' && current_role() !== 'admin') {
 
 $uid = current_user_id();
 
-// Collector's own coordinates
+// Collector's coordinates
 $me = $pdo->prepare("SELECT latitude, longitude FROM users WHERE user_id = :u");
 $me->execute([':u' => $uid]);
 $me = $me->fetch();
 $myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['latitude']  : null;
 $myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
-// Fetch ALL candidate donations (status available / requested / accepted)
+// Fetch candidate donations
 $sql = "
     SELECT d.*, u.name AS donor_name,
            (SELECT COUNT(*) FROM collector_tasks ct
@@ -26,7 +26,7 @@ $sql = "
                 AND ct.status IN ('accepted','pickup_started','picked_up','delivering','completed')) AS taken
     FROM food_donations d
     JOIN users u ON u.user_id = d.donor_id
-    WHERE d.status IN ('available','requested','accepted')
+    WHERE d.status IN ('accepted')
       AND d.delivery_preference IN ('collector','any')
       AND (d.best_before IS NULL OR d.best_before > NOW())
     ORDER BY d.created_at DESC
@@ -34,13 +34,11 @@ $sql = "
 ";
 $all = $pdo->query($sql)->fetchAll();
 
-// ---- Apply 15 KM filter strictly ----
+// 15 KM filter
 $tasks = [];
 if ($myLat !== null && $myLng !== null) {
     foreach ($all as $t) {
-        // Skip if someone already took it
         if ((int)$t['taken'] > 0) continue;
-        // Skip if donation has no coords
         if ($t['latitude'] === null || $t['longitude'] === null) continue;
 
         $d = haversine_km($myLat, $myLng, (float)$t['latitude'], (float)$t['longitude']);
@@ -60,8 +58,7 @@ if ($myLat !== null && $myLng !== null) {
     </div>
 <?php else: ?>
     <div class="toast toast-info mb-2" style="font-size:13px">
-        Showing pickup tasks within <strong><?= MATCH_RADIUS_KM ?> KM</strong> of your location
-        (<?= number_format($myLat, 4) ?>, <?= number_format($myLng, 4) ?>).
+        Showing pickup tasks within <strong><?= MATCH_RADIUS_KM ?> KM</strong> of your location.
     </div>
 <?php endif; ?>
 
@@ -93,12 +90,22 @@ if ($myLat !== null && $myLng !== null) {
                     </td>
                     <td><?= sanitize($t['donor_name']) ?></td>
                     <td><?= sanitize($t['area'] ?: $t['city']) ?></td>
-                    <td><span class="badge badge-blue">📍 <?= number_format($t['distance_km'], 1) ?> KM</span></td>
+                    <td>
+                        <?php if (isset($t['distance_km'])): ?>
+                            <span class="badge badge-blue">
+                                📍 <?= $t['distance_km'] < 0.1
+                                    ? 'Same location'
+                                    : number_format($t['distance_km'], 1) . ' KM' ?>
+                            </span>
+                        <?php else: ?>
+                            <span class="badge badge-gray">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td><span class="badge <?= $uCls ?>"><?= $uTxt ?></span></td>
                     <td><?= $bb ?></td>
                     <td>
                         <a href="<?= BASE_URL ?>collector/task-details.php?id=<?= (int)$t['donation_id'] ?>"
-                           class="btn btn-primary btn-sm">View &amp; Accept</a>
+                           class="btn btn-primary btn-sm">View &amp; Request</a>
                     </td>
                 </tr>
             <?php endforeach; ?>
