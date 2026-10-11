@@ -4,7 +4,7 @@
 // Requires: Google Maps JavaScript API + Places API enabled on the key.
 
 if (!defined('GOOGLE_MAPS_KEY')) {
-    define('GOOGLE_MAPS_KEY', 'PASTE_YOUR_DEMO_KEY_HERE');
+    define('GOOGLE_MAPS_KEY', 'AIzaSyAFG9DP2R9rNYiwzI5zcJJy1kPekHAz5nY');
 }
 
 function render_location_picker($old = [], $prefix = '') {
