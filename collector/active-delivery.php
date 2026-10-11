@@ -19,9 +19,12 @@ $stmt = $pdo->prepare("
            d.address AS pickup_address, d.area AS pickup_area, d.city AS pickup_city,
            d.best_before, d.urgency,
            u.name AS donor_name, u.phone AS donor_phone,
-           fr.request_id, fr.recipient_id, fr.contact_number AS recipient_phone,
-           fr.delivery_address AS recipient_address,
-           ru.name AS recipient_name, ru.city AS recipient_city, ru.area AS recipient_area
+           fr.request_id, fr.recipient_id, fr.contact_number AS recipient_contact,
+           fr.delivery_address AS recipient_delivery_address,
+           ru.name AS recipient_name, ru.phone AS recipient_phone, ru.email AS recipient_email,
+           ru.city AS recipient_city, ru.area AS recipient_area,
+           ru.pincode AS recipient_pincode, ru.address AS recipient_address,
+           ru.latitude AS recipient_lat, ru.longitude AS recipient_lng
     FROM collector_tasks ct
     JOIN food_donations d ON d.donation_id = ct.donation_id
     JOIN users u ON u.user_id = d.donor_id
@@ -46,7 +49,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post('action');
 
-    // ---- Advance status ----
     if ($action === 'advance') {
         $cur = $t['status'];
         if (isset($statusFlow[$cur])) {
@@ -77,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([':d' => $t['donation_id'], ':old' => $t['status'], ':new' => $next, ':u' => $uid]);
 
             if ($next === 'picked_up' && !empty($t['recipient_id'])) {
-                notify($pdo, $t['recipient_id'], '🍱 Food Collected',
+                notify($pdo, (int)$t['recipient_id'], '🍱 Food Collected',
                     'Your food has been collected and is on the way.', 'delivery', $t['donation_id']);
             }
 
@@ -86,7 +88,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // ---- Upload delivery proof ----
     if ($action === 'upload_proof') {
         if (!in_array($t['status'], ['awaiting_proof','delivering'], true)) {
             $errors[] = 'You cannot upload proof at this stage.';
@@ -100,7 +101,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $pdo->beginTransaction();
                 try {
-                    // 1. Create the deliveries row first (required by FK on delivery_proofs.delivery_id)
                     $insDel = $pdo->prepare("
                         INSERT INTO deliveries (donation_id, request_id, method, collector_id, status, delivered_at, notes)
                         VALUES (:d, :r, 'collector', :c, 'delivered', NOW(), :note)
@@ -113,7 +113,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                     $deliveryId = (int)$pdo->lastInsertId();
 
-                    // 2. Insert delivery proof linked to that delivery_id
                     $pdo->prepare("
                         INSERT INTO delivery_proofs
                           (donation_id, request_id, delivery_id, uploaded_by, uploaded_by_role, proof_image, delivery_note)
@@ -127,127 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':note' => post('delivery_note'),
                     ]);
 
-                    // 3. Update collector task
                     $pdo->prepare("UPDATE collector_tasks SET status='delivered', delivery_time=NOW() WHERE task_id=:t")
                         ->execute([':t' => $taskId]);
 
-                    // 4. Update donation
-                    $pdo->prepare("UPDATE food_donations SET status='delivered' WHERE donation_id=:d")
-                        ->execute([':d' => $t['donation_id']]);
-
-                    // 5. History
-                    $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by)
-                                   VALUES (:d, :old, 'delivered', :u)")
-                        ->execute([':d' => $t['donation_id'], ':old' => $t['status'], ':u' => $uid]);
-
-                    $pdo->commit();
-
-                    // Notifications
-                    notify($pdo, $t['donor_id'], '✅ Food Delivered',
-                        'Your donated food has been delivered successfully. Delivery proof uploaded.',
-                        'delivered', $t['donation_id']);
-
-                    if (!empty($t['recipient_id'])) {
-                        notify($pdo, $t['recipient_id'], '🍱 Food Delivered',
-                            'Your food has been delivered. Delivery proof is available. Please confirm receipt.',
-                            'delivered', $t['donation_id']);
-                    }
-
-                    notify_admins($pdo, '📷 Delivery Proof Uploaded',
-                        'Collector uploaded proof for donation #' . $t['donation_id'],
-                        'proof', $t['donation_id']);
-
-                    set_flash('success', 'Delivery proof submitted!');
-                    redirect(BASE_URL . 'collector/completed-tasks.php');
-
-                } catch (Exception $ex) {
-                    if ($pdo->inTransaction()) {
-                        $pdo->rollBack();
-                    }
-                    $errors[] = 'Upload failed: ' . $ex->getMessage();
-                }
-            }
-        }
-    }
-}
-
-$pageTitle = 'Active Delivery';
-require_once __DIR__ . '/../includes/dashboard-header.php';
-?>
-
-<?php if ($errors): ?>
-    <div class="toast toast-error"><?php foreach ($errors as $e): ?><?= sanitize($e) ?><br><?php endforeach; ?></div>
-<?php endif; ?>
-
-<div class="card mb-3">
-    <div class="flex-between mb-2">
-        <h2><?= sanitize($t['food_name']) ?></h2>
-        <?= status_badge($t['status']) ?>
-    </div>
-
-    <div class="details-grid">
-        <img src="<?= food_photo_url($t['food_photo']) ?>" alt="">
-        <div>
-            <h4 style="margin-bottom:8px">📍 Pickup From</h4>
-            <p><strong><?= sanitize($t['donor_name']) ?></strong></p>
-            <p><?= sanitize($t['pickup_address']) ?>, <?= sanitize($t['pickup_area']) ?>, <?= sanitize($t['pickup_city']) ?></p>
-            <p><strong>Phone:</strong> <?= sanitize($t['donor_phone'] ?: '—') ?></p>
-
-            <h4 style="margin:16px 0 8px">🏁 Deliver To</h4>
-            <p><strong><?= sanitize($t['recipient_name'] ?: 'Recipient') ?></strong></p>
-            <?php if (!empty($t['recipient_address'])): ?>
-                <p><?= sanitize($t['recipient_address']) ?></p>
-            <?php elseif (!empty($t['recipient_city'])): ?>
-                <p><?= sanitize($t['recipient_area'] ?: '') ?> <?= sanitize($t['recipient_city']) ?></p>
-            <?php endif; ?>
-            <p><strong>Phone:</strong> <?= sanitize($t['recipient_phone'] ?: '—') ?></p>
-
-            <p style="margin-top:12px"><strong>Quantity:</strong> <?= (float)$t['quantity'] ?> <?= sanitize($t['unit']) ?></p>
-        </div>
-    </div>
-</div>
-
-<?php if (isset($statusFlow[$t['status']])): ?>
-    <div class="card mb-3">
-        <h3 class="card-title">Next Step</h3>
-        <form method="post">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="advance">
-            <button class="btn btn-primary btn-lg"><?= $statusFlow[$t['status']][1] ?></button>
-        </form>
-    </div>
-<?php endif; ?>
-
-<?php if (in_array($t['status'], ['delivering','awaiting_proof'], true)): ?>
-    <div class="card">
-        <h3 class="card-title">📷 Upload Delivery Proof</h3>
-        <p class="text-muted mb-2">Mandatory — take a photo of the food being handed over.</p>
-
-        <form method="post" enctype="multipart/form-data">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="upload_proof">
-
-            <div class="form-group">
-                <label class="form-label">Delivery Proof Photo *</label>
-                <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp"
-                       onchange="previewImage(this, document.getElementById('proof-preview'))">
-                <img id="proof-preview" style="display:none;max-width:260px;margin-top:10px;border-radius:10px">
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Delivery Note (optional)</label>
-                <textarea name="delivery_note" class="form-control" rows="2" placeholder="e.g. Food delivered successfully to the recipient."></textarea>
-            </div>
-
-            <button class="btn btn-primary btn-lg">Submit Delivery Proof</button>
-        </form>
-    </div>
-<?php endif; ?>
-
-<style>
-.details-grid { display:grid; grid-template-columns: 260px 1fr; gap:20px; }
-.details-grid img { width:100%; border-radius:12px; }
-@media (max-width: 700px) { .details-grid { grid-template-columns: 1fr; } }
-</style>
-
-<?php require_once __DIR__ . '/../includes/dashboard-footer.php'; ?>
+                    $pdo->prepare("UPDATE food_donations SET status='delivered' WHERE donation_id=
