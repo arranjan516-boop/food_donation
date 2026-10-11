@@ -14,7 +14,9 @@ $uid = current_user_id();
 $nrId = int_get('id');
 
 $stmt = $pdo->prepare("
-        SELECT nr.*, d.donation_id, d.food_name, d.food_photo, d.unit, d.quantity, d.people_served,
+    SELECT nr.*,
+           d.donation_id, d.donor_id, d.food_name, d.food_photo, d.unit,
+           d.quantity, d.people_served,
            d.address AS pickup_address, d.area AS pickup_area, d.city AS pickup_city,
            d.best_before, d.status AS donation_status,
            u.name AS donor_name, u.phone AS donor_phone
@@ -36,6 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'mark_collected') {
         $pdo->prepare("UPDATE ngo_requests SET status='completed', notes = CONCAT(COALESCE(notes,''), ' | Collected at ', NOW()) WHERE ngo_request_id=:n")
             ->execute([':n' => $nrId]);
+
         $pdo->prepare("UPDATE food_donations SET status='picked_up' WHERE donation_id=:d")
             ->execute([':d' => $r['donation_id']]);
 
@@ -43,7 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                        VALUES (:d, 'ngo_assigned', 'picked_up', :u)")
             ->execute([':d' => $r['donation_id'], ':u' => $uid]);
 
-        notify($pdo, $r['donor_id'], '🍱 Food Collected',
+        // Notify the donor (donor_id is now selected)
+        notify($pdo, (int)$r['donor_id'], '🍱 Food Collected',
             'Your donation "' . $r['food_name'] . '" has been collected by ' . current_user()['name'] . '.',
             'ngo', $r['donation_id']);
 
@@ -63,7 +67,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($r['food_name']) ?></h2>
-<?= status_badge($r['donation_status']) ?>
+        <?= status_badge($r['donation_status']) ?>
     </div>
 
     <div class="details-grid">
