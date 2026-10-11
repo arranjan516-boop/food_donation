@@ -53,3 +53,45 @@ function mark_all_notifications_read($pdo, $userId) {
     $stmt = $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE user_id = :u");
     $stmt->execute([':u' => $userId]);
 }
+/**
+ * Notify nearby collectors and NGOs after a recipient has been accepted.
+ * 15 KM radius enforced by notify_nearby_role().
+ */
+function notify_collectors_and_ngos_after_acceptance($pdo, $donationId, $donorLat, $donorLng, $foodName, $peopleServed) {
+    $count = 0;
+
+    $count += notify_nearby_role(
+        $pdo, 'collector', $donorLat, $donorLng,
+        '🚴 New Pickup Available',
+        $peopleServed . ' meals of "' . $foodName . '" need collection.',
+        'new_pickup', $donationId
+    );
+
+    $count += notify_nearby_role(
+        $pdo, 'ngo', $donorLat, $donorLng,
+        '🏢 New Donation Available',
+        'A donation "' . $foodName . '" is ready for NGO handling.',
+        'new_donation', $donationId
+    );
+
+    return $count;
+}
+
+/**
+ * Auto-cancel available donations older than 2 hours with no recipient request.
+ * Safe to call on any dashboard load — cheap query.
+ */
+function auto_expire_stale_donations($pdo) {
+    try {
+        $stmt = $pdo->prepare("
+            UPDATE food_donations
+            SET status = 'cancelled'
+            WHERE status = 'available'
+              AND created_at < DATE_SUB(NOW(), INTERVAL 2 HOUR)
+        ");
+        $stmt->execute();
+        return $stmt->rowCount();
+    } catch (Exception $e) {
+        return 0;
+    }
+}
