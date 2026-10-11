@@ -11,31 +11,31 @@ if (current_role() !== 'collector' && current_role() !== 'admin') {
 
 $uid = current_user_id();
 
-// ---- Stats ----
+// Stats
 $stats = $pdo->prepare("
     SELECT
-      SUM(CASE WHEN status='available' THEN 1 ELSE 0 END) AS available_tasks,
-      SUM(CASE WHEN status='accepted'  THEN 1 ELSE 0 END) AS accepted_tasks,
+      SUM(CASE WHEN status='pending'  THEN 1 ELSE 0 END) AS pending_tasks,
+      SUM(CASE WHEN status='accepted' THEN 1 ELSE 0 END) AS accepted_tasks,
       SUM(CASE WHEN status IN ('pickup_started','picked_up','delivering') THEN 1 ELSE 0 END) AS active_deliveries,
-      SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed_tasks
+      SUM(CASE WHEN status IN ('delivered','completed') THEN 1 ELSE 0 END) AS completed_tasks
     FROM collector_tasks
     WHERE collector_id = :u
 ");
 $stats->execute([':u' => $uid]);
 $s = $stats->fetch();
-$s['available_tasks']    = $s['available_tasks']    ?? 0;
+$s['pending_tasks']      = $s['pending_tasks']      ?? 0;
 $s['accepted_tasks']     = $s['accepted_tasks']     ?? 0;
 $s['active_deliveries']  = $s['active_deliveries']  ?? 0;
 $s['completed_tasks']    = $s['completed_tasks']    ?? 0;
 
-// ---- Collector's own coordinates ----
+// Collector coordinates
 $me = $pdo->prepare("SELECT latitude, longitude FROM users WHERE user_id = :u");
 $me->execute([':u' => $uid]);
 $me = $me->fetch();
 $myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['latitude']  : null;
 $myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
-// ---- Nearby available tasks (15 KM filter applied strictly) ----
+// Nearby tasks
 $taskSql = "
     SELECT d.*, u.name AS donor_name,
            (SELECT COUNT(*) FROM collector_tasks ct
@@ -43,7 +43,7 @@ $taskSql = "
                 AND ct.status IN ('accepted','pickup_started','picked_up','delivering','completed')) AS taken
     FROM food_donations d
     JOIN users u ON u.user_id = d.donor_id
-    WHERE d.status IN ('available','requested','accepted')
+    WHERE d.status IN ('accepted')
       AND d.delivery_preference IN ('collector','any')
       AND (d.best_before IS NULL OR d.best_before > NOW())
     ORDER BY d.created_at DESC
@@ -67,7 +67,7 @@ if ($myLat !== null && $myLng !== null) {
 }
 $preview = array_slice($nearby, 0, 4);
 
-// ---- My active tasks ----
+// My active tasks
 $active = $pdo->prepare("
     SELECT ct.*, d.food_name, d.food_photo, d.city, d.area, u.name AS donor_name
     FROM collector_tasks ct
@@ -82,9 +82,9 @@ $activeTasks = $active->fetchAll();
 ?>
 
 <div class="stats-grid">
-    <div class="stat-card"><div class="icon-box green">📋</div>
-        <div><div class="stat-value"><?= (int)$s['available_tasks'] ?></div><div class="stat-label">Available</div></div></div>
-    <div class="stat-card"><div class="icon-box yellow">✅</div>
+    <div class="stat-card"><div class="icon-box yellow">⏳</div>
+        <div><div class="stat-value"><?= (int)$s['pending_tasks'] ?></div><div class="stat-label">Pending Requests</div></div></div>
+    <div class="stat-card"><div class="icon-box green">✅</div>
         <div><div class="stat-value"><?= (int)$s['accepted_tasks'] ?></div><div class="stat-label">Accepted</div></div></div>
     <div class="stat-card"><div class="icon-box blue">🚚</div>
         <div><div class="stat-value"><?= (int)$s['active_deliveries'] ?></div><div class="stat-label">Active Deliveries</div></div></div>
@@ -108,7 +108,7 @@ $activeTasks = $active->fetchAll();
     <div class="empty-state">
         <div class="empty-icon">🚴</div>
         <h3>No pickup tasks nearby</h3>
-        <p>New tasks will appear here automatically.</p>
+        <p>New tasks will appear here automatically once donors accept a recipient.</p>
     </div>
 <?php else: ?>
     <div class="table-card mb-3">
@@ -126,7 +126,17 @@ $activeTasks = $active->fetchAll();
                     </td>
                     <td><?= sanitize($t['donor_name']) ?></td>
                     <td><?= sanitize($t['area'] ?: $t['city']) ?></td>
-                    <td><span class="badge badge-blue">📍 <?= number_format($t['distance_km'], 1) ?> KM</span></td>
+                    <td>
+                        <?php if (isset($t['distance_km'])): ?>
+                            <span class="badge badge-blue">
+                                📍 <?= $t['distance_km'] < 0.1
+                                    ? 'Same location'
+                                    : number_format($t['distance_km'], 1) . ' KM' ?>
+                            </span>
+                        <?php else: ?>
+                            <span class="badge badge-gray">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td>
                         <?php
                             $uCls = in_array($t['urgency'], ['urgent','very_urgent']) ? 'badge-red' : 'badge-yellow';
