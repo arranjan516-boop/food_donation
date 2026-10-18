@@ -1,5 +1,9 @@
 <?php
 // includes/dashboard-header.php
+if (ob_get_level() === 0) {
+    ob_start(); // Start output buffering to prevent headers already sent errors
+}
+
 if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/functions.php';
@@ -14,7 +18,6 @@ $__bellCount = unread_count($pdo, current_user_id());
 $__pageTitle = $pageTitle ?? 'Dashboard';
 $__current   = basename($_SERVER['PHP_SELF']);
 
-// Role → menu items
 $__menus = [
     'donor' => [
         ['Dashboard',       'donor/dashboard.php',         '🏠'],
@@ -83,7 +86,6 @@ $__menus = [
 $__menu = $__menus[$__role] ?? [];
 $__initial = strtoupper(substr($__user['name'] ?: 'U', 0, 1));
 
-// Fetch profile photo for topbar avatar
 $__avatarStmt = $pdo->prepare("SELECT profile_photo FROM users WHERE user_id = :u");
 $__avatarStmt->execute([':u' => current_user_id()]);
 $__avatarPhoto = $__avatarStmt->fetchColumn() ?: null;
@@ -139,15 +141,15 @@ $__avatarPhoto = $__avatarStmt->fetchColumn() ?: null;
                     <?php endif; ?>
                 </a>
                 <div class="user-chip">
-    <div class="avatar">
-        <?php if ($__avatarPhoto): ?>
-            <img src="<?= PROFILE_UPLOAD_URL . rawurlencode($__avatarPhoto) ?>" alt="">
-        <?php else: ?>
-            <?= $__initial ?>
-        <?php endif; ?>
-    </div>
-    <span><?= sanitize($__user['name']) ?></span>
-</div>
+                    <div class="avatar">
+                        <?php if ($__avatarPhoto): ?>
+                            <img src="<?= PROFILE_UPLOAD_URL . rawurlencode($__avatarPhoto) ?>" alt="">
+                        <?php else: ?>
+                            <?= $__initial ?>
+                        <?php endif; ?>
+                    </div>
+                    <span><?= sanitize($__user['name']) ?></span>
+                </div>
             </div>
         </div>
 
