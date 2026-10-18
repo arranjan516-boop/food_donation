@@ -134,7 +134,8 @@ $proof = $pf->fetch();
         <div><strong>Phone:</strong>
             <?php if ($acceptedRecipient['recipient_phone']): ?>
                 <a href="tel:<?= sanitize($acceptedRecipient['recipient_phone']) ?>"><?= sanitize($acceptedRecipient['recipient_phone']) ?></a>
-            <?php else: ?>—<?php endif; ?>
+            <a href="<?= BASE_URL ?>chat.php?donation_id=<?= $id ?>" class="btn btn-primary btn-sm mt-2">💬 Chat with Recipient</a>
+    <?php else: ?>—<?php endif; ?>
         </div>
         <div><strong>Email:</strong> <?= sanitize($acceptedRecipient['recipient_email'] ?: '—') ?></div>
         <div style="grid-column:1/-1">
