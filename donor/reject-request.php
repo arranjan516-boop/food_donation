@@ -41,7 +41,7 @@ if (!$r || $r['status'] !== 'pending') {
 $pdo->prepare("UPDATE food_requests SET status='rejected' WHERE request_id=:r")
     ->execute([':r' => $rid]);
 
-notify($pdo, $r['recipient_id'], '❌ Request Declined',
+notify($pdo, (int)$r['recipient_id'], '❌ Request Declined',
     'Your request for "' . $r['food_name'] . '" was declined.',
     'request_rejected', $r['donation_id']);
 
