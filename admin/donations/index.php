@@ -14,19 +14,15 @@ $sql = "SELECT d.*, u.name AS donor_name
         WHERE 1=1";
 $params = [];
 if ($status) { $sql .= " AND d.status = :s"; $params[':s'] = $status; }
-if ($search) {
-    $sql .= " AND (d.food_name LIKE :q1 OR u.name LIKE :q2)";
-    $params[':q1'] = "%$search%";
-    $params[':q2'] = "%$search%";
-}
-$sql .= " ORDER BY d.created_at DESC LIMIT 200";
+if ($search) { $sql .= " AND (d.food_name LIKE :q1 OR u.name LIKE :q2)"; $params[':q1'] = "%$search%"; $params[':q2'] = "%$search%"; }
+$sql .= " ORDER BY d.created_at DESC LIMIT 500";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
 ?>
 
-<form method="get" class="filter-bar" style="grid-template-columns: 2fr 1fr auto auto">
+<form method="get" class="filter-bar mb-3" style="grid-template-columns: 2fr 1fr auto auto">
     <input type="text" name="q" value="<?= sanitize($search) ?>" class="form-control" placeholder="🔍 Food name or donor...">
     <select name="status" class="form-control">
         <option value="">All Statuses</option>
@@ -38,18 +34,22 @@ $rows = $stmt->fetchAll();
     <a href="?" class="btn btn-outline">Reset</a>
 </form>
 
-<div class="table-card">
-    <div class="table-card-header"><h3>Donations (<?= count($rows) ?>)</h3></div>
+<div class="admin-table-wrapper">
+    <div class="admin-table-header">
+        <h3>Donations (<?= count($rows) ?>)</h3>
+        <a href="<?= BASE_URL ?>admin/export-csv.php?type=donations" class="btn btn-accent btn-sm">📥 Export CSV</a>
+    </div>
+    
     <?php if (!$rows): ?>
         <div style="padding:40px;text-align:center"><p class="text-muted">No donations found.</p></div>
     <?php else: ?>
-        <table class="table">
+        <table class="admin-table">
             <thead><tr><th>Photo</th><th>Food</th><th>Donor</th><th>Qty</th><th>Location</th><th>Method</th><th>Status</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($rows as $d): ?>
                 <tr>
-                    <td><img class="thumb" src="<?= food_photo_url($d['food_photo']) ?>" alt=""></td>
-                    <td><?= sanitize($d['food_name']) ?></td>
+                    <td><img class="thumb" src="<?= food_photo_url($d['food_photo']) ?>" alt="" style="width:40px;height:40px;border-radius:6px;object-fit:cover;"></td>
+                    <td><strong><?= sanitize($d['food_name']) ?></strong></td>
                     <td><?= sanitize($d['donor_name']) ?></td>
                     <td><?= (float)$d['quantity'] ?> <?= sanitize($d['unit']) ?></td>
                     <td><?= sanitize($d['area'] ?: $d['city']) ?></td>
