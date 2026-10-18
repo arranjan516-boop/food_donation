@@ -9,11 +9,14 @@ function sanitize($str) {
 }
 
 function redirect($path) {
-    // Clean any output buffer to prevent "headers already sent" errors
-    if (ob_get_level() > 0) {
+    // Discard any output accidentally printed (like hidden spaces or BOM)
+    while (ob_get_level() > 0) {
         ob_end_clean();
     }
-    header('Location: ' . $path);
+    // Force the header
+    if (!headers_sent()) {
+        header('Location: ' . $path);
+    }
     exit;
 }
 
