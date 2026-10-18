@@ -182,7 +182,11 @@ function status_badge($status) {
     $text = ucwords(str_replace('_', ' ', $status));
     return "<span class='badge {$cls}'>{$text}</span>";
 }
-
+function auto_expire_stale_donations($pdo) {
+    try {
+        $pdo->exec("CALL expire_old_donations()");
+    } catch (Exception $e) { /* Silent fail */ }
+}
 function food_photo_url($photo) {
     if (!$photo) return BASE_URL . 'assets/images/default-food.jpg';
     return FOOD_UPLOAD_URL . rawurlencode($photo);
