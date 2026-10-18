@@ -4,7 +4,8 @@
 </div><!-- .dash -->
 
 <script>
-    const BASE_URL = <?= json_encode(BASE_URL) ?>;
+    // Define BASE_URL for JavaScript
+    const BASE_URL = "<?= BASE_URL ?>";
 </script>
 <script src="<?= BASE_URL ?>assets/js/script.js"></script>
 <script src="<?= BASE_URL ?>assets/js/notification.js"></script>
