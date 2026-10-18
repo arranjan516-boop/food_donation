@@ -1,5 +1,6 @@
 <?php
 // recipient/request-food.php
+
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/notification-functions.php';
@@ -9,7 +10,7 @@ $uid = current_user_id();
 $donationId = int_get('id');
 $errors = [];
 
-// Load donation
+// 1. Load donation details
 $stmt = $pdo->prepare("
     SELECT d.*, u.name AS donor_name
     FROM food_donations d
@@ -19,9 +20,12 @@ $stmt = $pdo->prepare("
 $stmt->execute([':id' => $donationId]);
 $d = $stmt->fetch();
 
-if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'recipient/available-food.php'); }
+if (!$d) { 
+    set_flash('error', 'Donation not found.'); 
+    redirect(BASE_URL . 'recipient/available-food.php'); 
+}
 
-// --- Handle POST BEFORE output ---
+// 2. Handle Form Submission BEFORE printing any HTML
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
 
@@ -31,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $address = post('delivery_address');
     $message = post('message');
 
+    // Validation
     if ($qty <= 0) $errors[] = 'Quantity must be greater than 0.';
     if ($qty > (float)$d['quantity']) $errors[] = 'Quantity exceeds available.';
     if (!$d['allow_partial_request'] && abs($qty - (float)$d['quantity']) > 0.001) {
@@ -38,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($contact === '') $errors[] = 'Contact number is required.';
 
-    // Already requested?
+    // Check if already requested
     $check = $pdo->prepare("SELECT request_id FROM food_requests WHERE donation_id = :d AND recipient_id = :u LIMIT 1");
     $check->execute([':d' => $donationId, ':u' => $uid]);
     if ($check->fetch()) $errors[] = 'You have already requested this donation.';
@@ -47,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            // Re-lock the donation row
+            // Lock the donation row to prevent duplicate claims
             $lock = $pdo->prepare("SELECT status, quantity FROM food_donations WHERE donation_id = :d FOR UPDATE");
             $lock->execute([':d' => $donationId]);
             $live = $lock->fetch();
@@ -79,7 +84,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Update donation status
             $remaining = (float)$live['quantity'] - $qty;
             if ($d['allow_partial_request'] && $remaining > 0.001) {
-                // still available for others
                 $pdo->prepare("UPDATE food_donations SET quantity = :q WHERE donation_id = :d")
                     ->execute([':q' => $remaining, ':d' => $donationId]);
             } else {
@@ -88,8 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // History
-            $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by)
-                           VALUES (:d, :old, :new, :u)")
+            $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, :old, :new, :u)")
                 ->execute([
                     ':d' => $donationId,
                     ':old' => $live['status'],
@@ -100,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
 
             // Notifications
-            notify($pdo, $d['donor_id'], '📨 New Food Request',
+            notify($pdo, (int)$d['donor_id'], '📨 New Food Request',
                 current_user()['name'] . ' requested ' . $qty . ' ' . $d['unit'] . ' of "' . $d['food_name'] . '".',
                 'new_request', $donationId);
 
@@ -118,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// ---- Now safe to output HTML ----
+// 3. NOW it is safe to print the HTML
 $pageTitle = 'Request Food';
 require_once __DIR__ . '/../includes/dashboard-header.php';
 ?>
@@ -159,15 +162,15 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
             <label class="form-label">Required Quantity (<?= sanitize($d['unit']) ?>) *</label>
             <input type="number" step="0.1" min="0.1" max="<?= (float)$d['quantity'] ?>" name="quantity"
                    class="form-control" required
-                   value="<?= $d['allow_partial_request'] ? '' : (float)$d['quantity'] ?>">
+                   value="<?= isset($_POST['quantity']) ? sanitize($_POST['quantity']) : ($d['allow_partial_request'] ? '' : (float)$d['quantity']) ?>">
             <small class="text-muted">Max <?= (float)$d['quantity'] ?> <?= sanitize($d['unit']) ?></small>
         </div>
         <div class="form-group">
             <label class="form-label">Delivery Preference *</label>
             <select name="delivery_preference" class="form-control" required>
-                <option value="collector">Collector Delivery</option>
-                <option value="self_delivery">Self Pickup</option>
-                <option value="ngo">NGO Distribution</option>
+                <option value="collector" <?= (isset($_POST['delivery_preference']) && $_POST['delivery_preference'] === 'collector') ? 'selected' : '' ?>>Collector Delivery</option>
+                <option value="self_delivery" <?= (isset($_POST['delivery_preference']) && $_POST['delivery_preference'] === 'self_delivery') ? 'selected' : '' ?>>Self Pickup</option>
+                <option value="ngo" <?= (isset($_POST['delivery_preference']) && $_POST['delivery_preference'] === 'ngo') ? 'selected' : '' ?>>NGO Distribution</option>
             </select>
         </div>
     </div>
@@ -175,17 +178,17 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="form-row">
         <div class="form-group">
             <label class="form-label">Contact Number *</label>
-            <input type="text" name="contact_number" class="form-control" required>
+            <input type="text" name="contact_number" class="form-control" required value="<?= isset($_POST['contact_number']) ? sanitize($_POST['contact_number']) : '' ?>">
         </div>
         <div class="form-group">
             <label class="form-label">Delivery Address</label>
-            <input type="text" name="delivery_address" class="form-control">
+            <input type="text" name="delivery_address" class="form-control" value="<?= isset($_POST['delivery_address']) ? sanitize($_POST['delivery_address']) : '' ?>">
         </div>
     </div>
 
     <div class="form-group">
         <label class="form-label">Additional Message</label>
-        <textarea name="message" class="form-control" rows="3"></textarea>
+        <textarea name="message" class="form-control" rows="3"><?= isset($_POST['message']) ? sanitize($_POST['message']) : '' ?></textarea>
     </div>
 
     <button class="btn btn-primary btn-lg">🍱 Request Food</button>
