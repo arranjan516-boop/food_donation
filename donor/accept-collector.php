@@ -1,8 +1,6 @@
 <?php
 // donor/accept-collector.php
 // PURE ACTION SCRIPT — no HTML.
-// Donor accepts ONE collector OR NGO request.
-// All other pending collector/NGO requests on the same donation are auto-rejected.
 
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
@@ -44,33 +42,26 @@ try {
         if (!$task) throw new Exception('Collector request not found.');
         if (current_role() !== 'admin' && (int)$task['donor_id'] !== $uid) throw new Exception('Access denied.');
         if ($task['status'] !== 'pending') throw new Exception('This request is no longer pending.');
-        if ($task['donation_status'] !== 'accepted') {
-            throw new Exception('You must first accept a recipient request.');
-        }
+        if ($task['donation_status'] !== 'accepted') throw new Exception('You must first accept a recipient request.');
 
         $pdo->prepare("UPDATE collector_tasks SET status='accepted', assigned_at=NOW() WHERE task_id=:id")
             ->execute([':id' => $reqId]);
 
-        $pdo->prepare("
-            UPDATE collector_tasks SET status='rejected'
-            WHERE donation_id = :d AND task_id <> :id AND status='pending'
-        ")->execute([':d' => $task['donation_id'], ':id' => $reqId]);
+        $pdo->prepare("UPDATE collector_tasks SET status='rejected' WHERE donation_id = :d AND task_id <> :id AND status='pending'")
+            ->execute([':d' => $task['donation_id'], ':id' => $reqId]);
 
-        $pdo->prepare("
-            UPDATE ngo_requests SET status='rejected'
-            WHERE donation_id = :d AND status='pending'
-        ")->execute([':d' => $task['donation_id']]);
+        $pdo->prepare("UPDATE ngo_requests SET status='rejected' WHERE donation_id = :d AND status='pending'")
+            ->execute([':d' => $task['donation_id']]);
 
         $pdo->prepare("UPDATE food_donations SET status='collector_assigned' WHERE donation_id=:d")
             ->execute([':d' => $task['donation_id']]);
 
-        $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by)
-                       VALUES (:d, 'accepted', 'collector_assigned', :u)")
+        $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, 'accepted', 'collector_assigned', :u)")
             ->execute([':d' => $task['donation_id'], ':u' => $uid]);
 
         $pdo->commit();
 
-        notify($pdo, $task['collector_id'], '🚴 You have been assigned',
+        notify($pdo, (int)$task['collector_id'], '🚴 You have been assigned',
             'The donor chose you to collect "' . $task['food_name'] . '".',
             'collector', $task['donation_id']);
 
@@ -104,33 +95,26 @@ try {
         if (!$req) throw new Exception('NGO request not found.');
         if (current_role() !== 'admin' && (int)$req['donor_id'] !== $uid) throw new Exception('Access denied.');
         if ($req['status'] !== 'pending') throw new Exception('This request is no longer pending.');
-        if ($req['donation_status'] !== 'accepted') {
-            throw new Exception('You must first accept a recipient request.');
-        }
+        if ($req['donation_status'] !== 'accepted') throw new Exception('You must first accept a recipient request.');
 
         $pdo->prepare("UPDATE ngo_requests SET status='accepted', accepted_at=NOW() WHERE ngo_request_id=:id")
             ->execute([':id' => $reqId]);
 
-        $pdo->prepare("
-            UPDATE ngo_requests SET status='rejected'
-            WHERE donation_id = :d AND ngo_request_id <> :id AND status='pending'
-        ")->execute([':d' => $req['donation_id'], ':id' => $reqId]);
+        $pdo->prepare("UPDATE ngo_requests SET status='rejected' WHERE donation_id = :d AND ngo_request_id <> :id AND status='pending'")
+            ->execute([':d' => $req['donation_id'], ':id' => $reqId]);
 
-        $pdo->prepare("
-            UPDATE collector_tasks SET status='rejected'
-            WHERE donation_id = :d AND status='pending'
-        ")->execute([':d' => $req['donation_id']]);
+        $pdo->prepare("UPDATE collector_tasks SET status='rejected' WHERE donation_id = :d AND status='pending'")
+            ->execute([':d' => $req['donation_id']]);
 
         $pdo->prepare("UPDATE food_donations SET status='ngo_assigned' WHERE donation_id=:d")
             ->execute([':d' => $req['donation_id']]);
 
-        $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by)
-                       VALUES (:d, 'accepted', 'ngo_assigned', :u)")
+        $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, 'accepted', 'ngo_assigned', :u)")
             ->execute([':d' => $req['donation_id'], ':u' => $uid]);
 
         $pdo->commit();
 
-        notify($pdo, $req['ngo_id'], '🏢 You have been assigned',
+        notify($pdo, (int)$req['ngo_id'], '🏢 You have been assigned',
             'The donor chose your NGO for "' . $req['food_name'] . '".',
             'ngo', $req['donation_id']);
 
