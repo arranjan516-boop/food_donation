@@ -12,5 +12,25 @@
 <?php if (!empty($extraJs)) foreach ((array)$extraJs as $j): ?>
     <script src="<?= BASE_URL ?>assets/js/<?= sanitize($j) ?>"></script>
 <?php endforeach; ?>
+        <script>
+$(document).ready(function() {
+    if ($.fn.DataTable) {
+        $('table.table').each(function() {
+            if ($.fn.DataTable.isDataTable(this)) return;
+            $(this).DataTable({
+                pageLength: 10,
+                lengthMenu: [10, 25, 50, 100],
+                order: [],
+                language: {
+                    search: "🔍 Search:",
+                    lengthMenu: "Show _MENU_ entries",
+                    info: "Showing _START_ to _END_ of _TOTAL_ entries",
+                    paginate: { previous: "←", next: "→" }
+                }
+            });
+        });
+    }
+});
+</script>
 </body>
 </html>
