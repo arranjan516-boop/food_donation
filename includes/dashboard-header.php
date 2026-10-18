@@ -103,6 +103,7 @@ $__avatarPhoto = $__avatarStmt->fetchColumn() ?: null;
     <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/responsive.css">
     <?php if (!empty($extraCss)) foreach ((array)$extraCss as $c): ?>
         <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/<?= sanitize($c) ?>">
+    <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/admin.css">
     <?php endforeach; ?>
 </head>
 <body>
