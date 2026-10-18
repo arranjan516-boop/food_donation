@@ -81,7 +81,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($r['food_name']) ?></h2>
-        <?= status_badge($r['status']) ?>
+        <div class="flex gap-2" style="align-items:center;">
+            <?= status_badge($r['status']) ?>
+            <?php if (in_array($r['status'], ['accepted', 'completed'], true)): ?>
+                <a href="<?= BASE_URL ?>chat.php?donation_id=<?= (int)$r['donation_id'] ?>" class="btn btn-primary btn-sm">
+                    💬 Chat with Donor
+                </a>
+            <?php endif; ?>
+        </div>
     </div>
 
     <div class="details-grid">
