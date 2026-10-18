@@ -1,6 +1,5 @@
 <?php
 // donor/donation-details.php
-// Two-stage approval view + recipient info panel (visible after Stage 1).
 
 $pageTitle = 'Donation Details';
 require_once __DIR__ . '/../includes/dashboard-header.php';
@@ -19,13 +18,10 @@ $stmt->execute($params);
 $d = $stmt->fetch();
 if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'donor/my-donations.php'); }
 
-// Recipient requests (with full contact + address)
+// Recipient requests
 $rq = $pdo->prepare("
-    SELECT fr.*,
-           u.name AS recipient_name, u.phone AS recipient_phone, u.email AS recipient_email,
-           u.address AS recipient_address, u.city AS recipient_city,
-           u.area AS recipient_area, u.pincode AS recipient_pincode,
-           u.latitude AS recipient_lat, u.longitude AS recipient_lng
+    SELECT fr.*, u.name AS recipient_name, u.phone AS recipient_phone, u.email AS recipient_email,
+           u.address AS recipient_address, u.city AS recipient_city, u.area AS recipient_area, u.pincode AS recipient_pincode
     FROM food_requests fr
     JOIN users u ON u.user_id = fr.recipient_id
     WHERE fr.donation_id = :id
@@ -44,11 +40,10 @@ $stage2Unlocked = ($acceptedRecipient !== null);
 
 // Collector requests
 $ct = $pdo->prepare("
-    SELECT ct.*, u.name AS collector_name, u.phone AS collector_phone,
-           u.city AS collector_city, u.area AS collector_area
+    SELECT ct.*, u.name AS collector_name, u.phone AS collector_phone
     FROM collector_tasks ct
     JOIN users u ON u.user_id = ct.collector_id
-    WHERE ct.donation_id = :id
+    WHERE ct.donation_id = :id AND ct.status IN ('pending','accepted','pickup_started','picked_up','delivering','delivered','completed')
     ORDER BY ct.task_id DESC
 ");
 $ct->execute([':id' => $id]);
@@ -64,11 +59,10 @@ foreach ($collectorRequests as $c) {
 
 // NGO requests
 $nr = $pdo->prepare("
-    SELECT nr.*, u.name AS ngo_name, u.phone AS ngo_phone,
-           u.city AS ngo_city, u.area AS ngo_area
+    SELECT nr.*, u.name AS ngo_name, u.phone AS ngo_phone
     FROM ngo_requests nr
     JOIN users u ON u.user_id = nr.ngo_id
-    WHERE nr.donation_id = :id
+    WHERE nr.donation_id = :id AND nr.status IN ('pending','accepted','completed')
     ORDER BY nr.requested_at DESC
 ");
 $nr->execute([':id' => $id]);
@@ -99,8 +93,8 @@ $proof = $pf->fetch();
     <p style="margin:0;font-size:14px">
         <strong>Workflow:</strong>
         Step 1 — Accept a <strong>recipient</strong>. &nbsp;
-        Step 2 — Accept <strong>one collector or NGO</strong>. &nbsp;
-        Step 3 — They deliver and upload proof. &nbsp;
+        Step 2 — Accept <strong>one collector or NGO</strong> (or deliver yourself). &nbsp;
+        Step 3 — Deliver and upload proof. &nbsp;
         Step 4 — Recipient confirms → completed.
     </p>
 </div>
@@ -150,19 +144,7 @@ $proof = $pf->fetch();
             <?= $acceptedRecipient['recipient_city']  ? ', ' . sanitize($acceptedRecipient['recipient_city'])  : '' ?>
             <?= $acceptedRecipient['recipient_pincode'] ? ' - ' . sanitize($acceptedRecipient['recipient_pincode']) : '' ?>
         </div>
-        <div><strong>Recipient's location:</strong>
-            <?= $acceptedRecipient['recipient_lat'] && $acceptedRecipient['recipient_lng']
-                ? sanitize(number_format($acceptedRecipient['recipient_lat'], 6) . ', ' . number_format($acceptedRecipient['recipient_lng'], 6))
-                : '—' ?>
-        </div>
-        <div><strong>Quantity to deliver:</strong> <?= (float)$acceptedRecipient['quantity'] ?> <?= sanitize($d['unit']) ?></div>
     </div>
-
-    <?php if ($acceptedRecipient['recipient_lat'] && $acceptedRecipient['recipient_lng']): ?>
-        <a class="btn btn-outline btn-sm mt-2"
-           href="https://www.google.com/maps/dir/?api=1&destination=<?= urlencode($acceptedRecipient['recipient_lat'] . ',' . $acceptedRecipient['recipient_lng']) ?>"
-           target="_blank">🗺️ Open route in Google Maps</a>
-    <?php endif; ?>
 </div>
 <?php endif; ?>
 
@@ -212,79 +194,106 @@ $proof = $pf->fetch();
     <?php endif; ?>
 </div>
 
-<!-- =============== STAGE 2: Collector / NGO Requests =============== -->
+<!-- =============== STAGE 2: Self Delivery OR Collector / NGO Requests =============== -->
 <div class="table-card mb-3" style="opacity:<?= $stage2Unlocked ? '1' : '0.55' ?>">
     <div class="table-card-header">
-        <h3>Stage 2 — Collector / NGO Requests</h3>
+        <h3>Stage 2 — Delivery</h3>
         <?php if (!$stage2Unlocked): ?>
             <span class="badge badge-yellow">🔒 Accept a recipient first</span>
-        <?php elseif ($collectorAccepted || $ngoAccepted): ?>
-            <span class="badge badge-green">✅ Assigned</span>
+        <?php elseif ($d['status'] === 'completed'): ?>
+            <span class="badge badge-green">✅ Completed</span>
         <?php endif; ?>
     </div>
 
-    <?php if (!$collectorPending && !$ngoPending && !$collectorAccepted && !$ngoAccepted): ?>
+    <?php if (!$stage2Unlocked): ?>
         <div style="padding:24px;text-align:center">
-            <p class="text-muted">
-                <?= $stage2Unlocked
-                    ? 'Waiting for collectors or NGOs to request. They were just notified.'
-                    : 'This section will activate once you accept a recipient.' ?>
-            </p>
+            <p class="text-muted">This section will activate once you accept a recipient.</p>
         </div>
     <?php else: ?>
-
-        <?php if ($collectorPending || $collectorAccepted): ?>
-            <div style="padding:14px 20px 6px;font-size:13px;font-weight:600;color:var(--gray-700)">🚴 Collector Requests</div>
-            <table class="table">
-                <thead><tr><th>Collector</th><th>Contact</th><th>Location</th><th>Status</th><th>Action</th></tr></thead>
-                <tbody>
-                <?php foreach ($collectorRequests as $c): ?>
-                    <?php if (!in_array($c['status'], ['pending','accepted','pickup_started','picked_up','delivering','delivered','completed'], true)) continue; ?>
-                    <tr>
-                        <td><strong><?= sanitize($c['collector_name']) ?></strong></td>
-                        <td><?= sanitize($c['collector_phone'] ?: '—') ?></td>
-                        <td><?= sanitize($c['collector_area'] ?: $c['collector_city']) ?></td>
-                        <td><?= status_badge($c['status']) ?></td>
-                        <td>
-                            <?php if ($c['status'] === 'pending' && $stage2Unlocked && !$collectorAccepted && !$ngoAccepted): ?>
-                                <form method="post" action="<?= BASE_URL ?>donor/accept-collector.php?type=collector&id=<?= (int)$c['task_id'] ?>" style="display:inline">
-                                    <?= csrf_field() ?>
-                                    <button class="btn btn-primary btn-sm" data-confirm="Assign this collector? All other requests will be rejected.">✅ Accept</button>
-                                </form>
-                            <?php else: ?>—<?php endif; ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+        <!-- 1. SELF DELIVERY MODULE -->
+        <?php if (in_array($d['delivery_preference'], ['self_delivery', 'any'], true) && !$collectorAccepted && !$ngoAccepted): ?>
+            <div style="padding:20px;border-bottom:1px solid var(--gray-100);background:#F9FAFB">
+                <h4 style="margin-bottom:10px">🚗 I Can Deliver Myself</h4>
+                <p class="text-muted mb-2" style="font-size:13px">You chose to deliver this food yourself.</p>
+                
+                <?php if (in_array($d['status'], ['accepted', 'out_for_delivery', 'awaiting_proof']) && !$proof): ?>
+                    <form method="post" action="<?= BASE_URL ?>donor/self-delivery.php?id=<?= $id ?>" enctype="multipart/form-data">
+                        <?= csrf_field() ?>
+                        <div class="form-group">
+                            <label class="form-label">Upload Delivery Proof *</label>
+                            <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
+                        </div>
+                        <div class="form-group">
+                            <textarea name="delivery_note" class="form-control" rows="2" placeholder="Delivery note (optional)"></textarea>
+                        </div>
+                        <button class="btn btn-primary">📷 Mark as Delivered (Upload Proof)</button>
+                    </form>
+                <?php elseif ($proof): ?>
+                    <div class="toast toast-success">✅ You have delivered this food and uploaded proof.</div>
+                <?php endif; ?>
+            </div>
         <?php endif; ?>
 
-        <?php if ($ngoPending || $ngoAccepted): ?>
-            <div style="padding:14px 20px 6px;font-size:13px;font-weight:600;color:var(--gray-700)">🏢 NGO Requests</div>
-            <table class="table">
-                <thead><tr><th>NGO</th><th>Contact</th><th>Location</th><th>Status</th><th>Action</th></tr></thead>
-                <tbody>
-                <?php foreach ($ngoRequests as $n): ?>
-                    <?php if (!in_array($n['status'], ['pending','accepted','completed'], true)) continue; ?>
-                    <tr>
-                        <td><strong><?= sanitize($n['ngo_name']) ?></strong></td>
-                        <td><?= sanitize($n['ngo_phone'] ?: '—') ?></td>
-                        <td><?= sanitize($n['ngo_area'] ?: $n['ngo_city']) ?></td>
-                        <td><?= status_badge($n['status']) ?></td>
-                        <td>
-                            <?php if ($n['status'] === 'pending' && $stage2Unlocked && !$collectorAccepted && !$ngoAccepted): ?>
-                                <form method="post" action="<?= BASE_URL ?>donor/accept-collector.php?type=ngo&id=<?= (int)$n['ngo_request_id'] ?>" style="display:inline">
-                                    <?= csrf_field() ?>
-                                    <button class="btn btn-primary btn-sm" data-confirm="Assign this NGO? All other requests will be rejected.">✅ Accept</button>
-                                </form>
-                            <?php else: ?>—<?php endif; ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        <?php endif; ?>
+        <!-- 2. COLLECTOR / NGO REQUESTS MODULE -->
+        <?php if (in_array($d['delivery_preference'], ['collector', 'ngo', 'any'], true)): ?>
+            <?php if (!$collectorPending && !$ngoPending && !$collectorAccepted && !$ngoAccepted): ?>
+                <div style="padding:24px;text-align:center">
+                    <p class="text-muted">Waiting for collectors or NGOs to request. They were just notified.</p>
+                </div>
+            <?php else: ?>
+                
+                <?php if ($collectorPending || $collectorAccepted): ?>
+                    <div style="padding:14px 20px 6px;font-size:13px;font-weight:600;color:var(--gray-700)">🚴 Collector Requests</div>
+                    <table class="table">
+                        <thead><tr><th>Collector</th><th>Contact</th><th>Status</th><th>Action</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($collectorRequests as $c): ?>
+                            <tr>
+                                <td><strong><?= sanitize($c['collector_name']) ?></strong></td>
+                                <td><?= sanitize($c['collector_phone'] ?: '—') ?></td>
+                                <td><?= status_badge($c['status']) ?></td>
+                                <td>
+                                    <?php if ($c['status'] === 'pending' && !$collectorAccepted && !$ngoAccepted): ?>
+                                        <form method="post" action="<?= BASE_URL ?>donor/accept-collector.php?type=collector&id=<?= (int)$c['task_id'] ?>" style="display:inline">
+                                            <?= csrf_field() ?>
+                                            <button class="btn btn-primary btn-sm" data-confirm="Assign this collector?">✅ Accept</button>
+                                        </form>
+                                    <?php else: ?>—<?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
 
+                <?php if ($ngoPending || $ngoAccepted): ?>
+                    <div style="padding:14px 20px 6px;font-size:13px;font-weight:600;color:var(--gray-700)">🏢 NGO Requests</div>
+                    <table class="table">
+                        <thead><tr><th>NGO</th><th>Contact</th><th>Status</th><th>Action</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($ngoRequests as $n): ?>
+                            <tr>
+                                <td><strong><?= sanitize($n['ngo_name']) ?></strong></td>
+                                <td><?= sanitize($n['ngo_phone'] ?: '—') ?></td>
+                                <td><?= status_badge($n['status']) ?></td>
+                                <td>
+                                    <?php if ($n['status'] === 'pending' && !$collectorAccepted && !$ngoAccepted): ?>
+                                        <form method="post" action="<?= BASE_URL ?>donor/accept-collector.php?type=ngo&id=<?= (int)$n['ngo_request_id'] ?>" style="display:inline">
+                                            <?= csrf_field() ?>
+                                            <button class="btn btn-primary btn-sm" data-confirm="Assign this NGO?">✅ Accept</button>
+                                        </form>
+                                    <?php else: ?>—<?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+
+            <?php endif; ?>
+        <?php endif; ?>
+        
     <?php endif; ?>
 </div>
 
@@ -293,19 +302,15 @@ $proof = $pf->fetch();
     <h3 class="card-title">📷 Delivery Proof</h3>
     <p><strong>Uploaded by:</strong> <?= sanitize($proof['uploader_name']) ?> (<?= sanitize($proof['uploaded_by_role']) ?>)</p>
     <p><strong>Date:</strong> <?= date('d M Y, h:i A', strtotime($proof['uploaded_at'])) ?></p>
-    <?php if ($proof['delivery_note']): ?><p><strong>Note:</strong> <?= sanitize($proof['delivery_note']) ?></p><?php endif; ?>
-    <img src="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>"
-         style="max-width:280px;border-radius:12px;margin-top:10px" alt="">
+    <img src="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>" style="max-width:280px;border-radius:12px;margin-top:10px" alt="">
 </div>
 <?php endif; ?>
 
 <style>
 .details-grid { display:grid; grid-template-columns: 320px 1fr; gap:24px; }
 @media (max-width: 700px) { .details-grid { grid-template-columns: 1fr; } }
-
 .recipient-info { display:grid; grid-template-columns: 1fr 1fr; gap:10px 24px; font-size:14px; }
 @media (max-width: 600px) { .recipient-info { grid-template-columns: 1fr; } }
-.recipient-info a { color: var(--green-dark); font-weight: 500; }
 </style>
 
 <?php require_once __DIR__ . '/../includes/dashboard-footer.php'; ?>
