@@ -9,6 +9,10 @@ function sanitize($str) {
 }
 
 function redirect($path) {
+    // Clean any output buffer to prevent "headers already sent" errors
+    if (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     header('Location: ' . $path);
     exit;
 }
@@ -74,9 +78,6 @@ function int_post($key, $default = 0) {
 
 /* =====================  DISTANCE (HAVERSINE)  ===================== */
 
-/**
- * Distance between two lat/lng points in KM.
- */
 function haversine_km($lat1, $lng1, $lat2, $lng2) {
     if ($lat1 === null || $lng1 === null || $lat2 === null || $lng2 === null) {
         return null;
@@ -91,13 +92,6 @@ function haversine_km($lat1, $lng1, $lat2, $lng2) {
 
 /* =====================  IMAGE UPLOAD (SECURE)  ===================== */
 
-/**
- * Securely upload an image.
- * $file       = $_FILES['...']
- * $destDir    = full filesystem path (with trailing slash)
- * $urlPrefix  = matching web URL prefix
- * Returns relative filename OR null on failure. Sets flash on error.
- */
 function upload_image($file, $destDir, $urlPrefix) {
     if (!isset($file) || $file['error'] === UPLOAD_ERR_NO_FILE) {
         return null;
@@ -117,7 +111,6 @@ function upload_image($file, $destDir, $urlPrefix) {
         return null;
     }
 
-    // Real MIME check (not just extension)
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime  = $finfo->file($tmp);
     if (!in_array($mime, ALLOWED_IMAGE_MIME, true)) {
@@ -125,7 +118,6 @@ function upload_image($file, $destDir, $urlPrefix) {
         return null;
     }
 
-    // Confirm it's a real image
     if (getimagesize($tmp) === false) {
         set_flash('error', 'File is not a valid image.');
         return null;
@@ -141,7 +133,6 @@ function upload_image($file, $destDir, $urlPrefix) {
         };
     }
 
-    // Secure random filename
     $newName = date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
     $target  = rtrim($destDir, '/\\') . DIRECTORY_SEPARATOR . $newName;
 
