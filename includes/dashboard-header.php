@@ -105,6 +105,9 @@ $__avatarPhoto = $__avatarStmt->fetchColumn() ?: null;
         <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/<?= sanitize($c) ?>">
     <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/admin.css">
     <?php endforeach; ?>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
 </head>
 <body>
 <div class="dash">
