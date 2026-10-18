@@ -1,9 +1,6 @@
 <?php
 // donor/accept-recipient.php
-// PURE ACTION SCRIPT — no HTML output before redirect.
-// Donor accepts a recipient's request.
-// After acceptance, if delivery_preference includes collector/NGO,
-// nearby collectors and NGOs within 15 KM are notified.
+// PURE ACTION SCRIPT — no HTML.
 
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
@@ -11,7 +8,6 @@ require_once __DIR__ . '/../includes/location-functions.php';
 require_once __DIR__ . '/../includes/notification-functions.php';
 
 require_login();
-
 if (current_role() !== 'donor' && current_role() !== 'admin') {
     set_flash('error', 'Access denied.');
     redirect(BASE_URL . 'index.php');
@@ -31,7 +27,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 verify_csrf();
 
-// Load request + donation
 $sql = "
     SELECT fr.*, d.donation_id, d.donor_id, d.food_name, d.people_served,
            d.delivery_preference, d.latitude, d.longitude,
@@ -65,19 +60,14 @@ if (!in_array($r['donation_status'], ['available','requested'], true)) {
 
 $pdo->beginTransaction();
 try {
-    // 1. Accept the recipient's request
+    // 1. Accept recipient
     $pdo->prepare("UPDATE food_requests SET status='accepted', accepted_at=NOW() WHERE request_id=:r")
         ->execute([':r' => $rid]);
 
-    // 2. Reject all other pending recipient requests (if partial not allowed)
+    // 2. Reject other pending recipients (if partial not allowed)
     if (!$r['allow_partial_request']) {
-        $pdo->prepare("
-            UPDATE food_requests
-            SET status='rejected'
-            WHERE donation_id = :d
-              AND request_id <> :r
-              AND status = 'pending'
-        ")->execute([':d' => $r['donation_id'], ':r' => $rid]);
+        $pdo->prepare("UPDATE food_requests SET status='rejected' WHERE donation_id = :d AND request_id <> :r AND status = 'pending'")
+            ->execute([':d' => $r['donation_id'], ':r' => $rid]);
     }
 
     // 3. Update donation status
@@ -85,23 +75,21 @@ try {
         ->execute([':d' => $r['donation_id']]);
 
     // 4. History
-    $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by)
-                   VALUES (:d, :old, 'accepted', :u)")
+    $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, :old, 'accepted', :u)")
         ->execute([':d' => $r['donation_id'], ':old' => $r['donation_status'], ':u' => $uid]);
 
     $pdo->commit();
 
-    // 5. Notify the recipient
-    notify($pdo, $r['recipient_id'], '✅ Request Accepted',
+    // 5. Notify recipient
+    notify($pdo, (int)$r['recipient_id'], '✅ Request Accepted',
         'Your request for "' . $r['food_name'] . '" has been accepted.',
         'request_accepted', $r['donation_id']);
 
-    // 6. If delivery preference includes collector/NGO, notify them now (within 15 KM)
+    // 6. Notify collectors/NGOs if needed
     $pref = $r['delivery_preference'];
     $notified = 0;
     if (in_array($pref, ['collector','ngo','any'], true)
         && $r['latitude'] !== null && $r['longitude'] !== null) {
-
         $notified = notify_collectors_and_ngos_after_acceptance(
             $pdo, $r['donation_id'],
             (float)$r['latitude'], (float)$r['longitude'],
