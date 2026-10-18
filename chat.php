@@ -13,6 +13,7 @@ if (!$donationId) {
     redirect(BASE_URL . 'index.php');
 }
 
+// 1. Fetch Donation and Recipient Info
 $stmt = $pdo->prepare("
     SELECT d.*, 
            (SELECT recipient_id FROM food_requests WHERE donation_id = d.donation_id AND status IN ('accepted','completed') LIMIT 1) AS recipient_id
@@ -22,7 +23,10 @@ $stmt = $pdo->prepare("
 $stmt->execute([':id' => $donationId]);
 $d = $stmt->fetch();
 
-if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'index.php'); }
+if (!$d) { 
+    set_flash('error', 'Donation not found.'); 
+    redirect(BASE_URL . 'index.php'); 
+}
 
 $isDonor = ((int)$d['donor_id'] === $uid);
 $isRecipient = ((int)$d['recipient_id'] === $uid);
@@ -41,43 +45,66 @@ if (!$d['recipient_id']) {
 $partnerId = $isDonor ? (int)$d['recipient_id'] : (int)$d['donor_id'];
 $errors = [];
 
+// 2. Handle POST (Send Message)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $msg = post('message');
+    
     if ($msg === '') {
         $errors[] = 'Message cannot be empty.';
     } else {
+        // Insert message
         $pdo->prepare("INSERT INTO messages (donation_id, sender_id, receiver_id, message) VALUES (:d, :s, :r, :m)")
             ->execute([':d' => $donationId, ':s' => $uid, ':r' => $partnerId, ':m' => $msg]);
 
+        // Mark incoming as read
         $pdo->prepare("UPDATE messages SET is_read = 1 WHERE donation_id = :d AND receiver_id = :u")
             ->execute([':d' => $donationId, ':u' => $uid]);
 
+        // Send notification
         notify($pdo, $partnerId, '💬 New Message', 
             current_user()['name'] . ' sent a message about "' . $d['food_name'] . '".',
             'chat', $donationId);
 
+        // Redirect to refresh and show new message
         redirect(BASE_URL . 'chat.php?donation_id=' . $donationId);
     }
 }
 
+// 3. Fetch Messages (FIXED: Using :u1 and :u2 to avoid duplicate placeholder error)
 $msgs = $pdo->prepare("
     SELECT m.*, u.name AS sender_name, u.role AS sender_role
     FROM messages m
     JOIN users u ON u.user_id = m.sender_id
     WHERE m.donation_id = :d
-      AND (m.sender_id = :u1 OR m.receiver_id = :u1)
+      AND (m.sender_id = :u1 OR m.receiver_id = :u2)
     ORDER BY m.created_at ASC
 ");
-$msgs->execute([':d' => $donationId, ':u1' => $uid]);
+$msgs->execute([
+    ':d' => $donationId, 
+    ':u1' => $uid, 
+    ':u2' => $uid
+]);
 $messages = $msgs->fetchAll();
 
+// Mark incoming as read (again after fetching)
 $pdo->prepare("UPDATE messages SET is_read = 1 WHERE donation_id = :d AND receiver_id = :u")
     ->execute([':d' => $donationId, ':u' => $uid]);
 
+// 4. Fetch Chat Partner Info (for the header)
 $pstmt = $pdo->prepare("SELECT name, role FROM users WHERE user_id = :u");
 $pstmt->execute([':u' => $partnerId]);
 $partner = $pstmt->fetch();
+
+// 5. Back URL logic
+$backUrl = BASE_URL . 'index.php';
+if ($isDonor) {
+    $backUrl = BASE_URL . 'donor/donation-details.php?id=' . $donationId;
+} elseif ($isRecipient) {
+    $backUrl = BASE_URL . 'recipient/request-details.php?id=' . $d['request_id'];
+} elseif ($isAdmin) {
+    $backUrl = BASE_URL . 'admin/donations/view.php?id=' . $donationId;
+}
 
 $pageTitle = 'Chat — ' . $d['food_name']; 
 require_once __DIR__ . '/includes/dashboard-header.php'; 
@@ -89,7 +116,7 @@ require_once __DIR__ . '/includes/dashboard-header.php';
             <h2>💬 <?= sanitize($d['food_name']) ?></h2>
             <p class="text-muted">Chat with <strong><?= sanitize($partner['name']) ?></strong> (<?= sanitize($partner['role']) ?>)</p>
         </div>
-        <a href="<?= BASE_URL ?><?= $isDonor ? 'donor/donation-details.php' : 'recipient/request-details.php' ?>?id=<?= $isDonor ? $donationId : $d['request_id'] ?? '' ?>" class="btn btn-outline btn-sm">← Back</a>
+        <a href="<?= $backUrl ?>" class="btn btn-outline btn-sm">← Back to Details</a>
     </div>
 
     <div class="chat-window" id="chatWindow">
@@ -120,6 +147,7 @@ require_once __DIR__ . '/includes/dashboard-header.php';
 </div>
 
 <script>
+    // Auto-scroll to bottom of chat
     const cw = document.getElementById('chatWindow');
     if (cw) cw.scrollTop = cw.scrollHeight;
 </script>
