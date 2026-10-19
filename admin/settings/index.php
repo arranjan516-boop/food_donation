@@ -18,12 +18,12 @@ $counts = $pdo->query("
 
 <div class="settings-container">
     
-    <!-- Sidebar Nav -->
+    <!-- Sidebar Navigation -->
     <div class="settings-nav">
-        <a href="#" class="active" onclick="showTab('general', this); return false;">⚙️ General</a>
-        <a href="#" onclick="showTab('database', this); return false;">🗄️ Database Info</a>
+        <a href="#" class="active" onclick="showTab('general', this); return false;">⚙️ General Settings</a>
+        <a href="#" onclick="showTab('database', this); return false;">🗄️ Database Overview</a>
         <a href="#" onclick="showTab('logs', this); return false;">📋 Activity Logs</a>
-        <a href="#" onclick="showTab('security', this); return false;">🛡️ Security</a>
+        <a href="#" onclick="showTab('security', this); return false;">🛡️ Security Audit</a>
     </div>
 
     <!-- Content Area -->
@@ -66,15 +66,15 @@ $counts = $pdo->query("
                 </label>
             </div>
 
-            <div class="form-group" style="margin-top:24px;">
-                <label class="form-label">Application Name</label>
-                <input type="text" class="form-control" value="FoodShare" disabled>
-                <small class="text-muted">Edit in <code>includes/constants.php</code></small>
-            </div>
-            <div class="form-group">
-                <label class="form-label">Match Radius (KM)</label>
-                <input type="number" class="form-control" value="15" disabled>
-                <small class="text-muted">Edit in <code>includes/constants.php</code></small>
+            <div style="margin-top:30px; display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                <div class="form-group">
+                    <label class="form-label">Application Name</label>
+                    <input type="text" class="form-control" value="FoodShare" disabled style="background:#F9FAFB;">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Match Radius (KM)</label>
+                    <input type="number" class="form-control" value="15" disabled style="background:#F9FAFB;">
+                </div>
             </div>
         </div>
 
@@ -83,30 +83,30 @@ $counts = $pdo->query("
             <h2 class="settings-section-title">Database Overview</h2>
             <p style="color:var(--gray-500); font-size:14px; margin-bottom:24px;">Live row counts from the <code>food_waste_donation</code> database.</p>
             
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
-                <div style="background:var(--gray-50); padding:20px; border-radius:8px;">
-                    <div style="font-size:12px; text-transform:uppercase; color:var(--gray-500); font-weight:600;">Total Users</div>
-                    <div style="font-size:28px; font-weight:700; color:var(--green-dark);"><?= number_format($counts['u']) ?></div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:20px;">
+                <div class="setting-card">
+                    <div class="label">Total Users</div>
+                    <div class="value"><?= number_format($counts['u']) ?></div>
                 </div>
-                <div style="background:var(--gray-50); padding:20px; border-radius:8px;">
-                    <div style="font-size:12px; text-transform:uppercase; color:var(--gray-500); font-weight:600;">Total Donations</div>
-                    <div style="font-size:28px; font-weight:700; color:var(--green-dark);"><?= number_format($counts['d']) ?></div>
+                <div class="setting-card">
+                    <div class="label">Total Donations</div>
+                    <div class="value"><?= number_format($counts['d']) ?></div>
                 </div>
-                <div style="background:var(--gray-50); padding:20px; border-radius:8px;">
-                    <div style="font-size:12px; text-transform:uppercase; color:var(--gray-500); font-weight:600;">Food Requests</div>
-                    <div style="font-size:28px; font-weight:700; color:var(--green-dark);"><?= number_format($counts['r']) ?></div>
+                <div class="setting-card">
+                    <div class="label">Food Requests</div>
+                    <div class="value"><?= number_format($counts['r']) ?></div>
                 </div>
-                <div style="background:var(--gray-50); padding:20px; border-radius:8px;">
-                    <div style="font-size:12px; text-transform:uppercase; color:var(--gray-500); font-weight:600;">Collector Tasks</div>
-                    <div style="font-size:28px; font-weight:700; color:var(--green-dark);"><?= number_format($counts['ct']) ?></div>
+                <div class="setting-card">
+                    <div class="label">Collector Tasks</div>
+                    <div class="value"><?= number_format($counts['ct']) ?></div>
                 </div>
-                <div style="background:var(--gray-50); padding:20px; border-radius:8px;">
-                    <div style="font-size:12px; text-transform:uppercase; color:var(--gray-500); font-weight:600;">NGO Requests</div>
-                    <div style="font-size:28px; font-weight:700; color:var(--green-dark);"><?= number_format($counts['nr']) ?></div>
+                <div class="setting-card">
+                    <div class="label">NGO Requests</div>
+                    <div class="value"><?= number_format($counts['nr']) ?></div>
                 </div>
-                <div style="background:var(--gray-50); padding:20px; border-radius:8px;">
-                    <div style="font-size:12px; text-transform:uppercase; color:var(--gray-500); font-weight:600;">Delivery Proofs</div>
-                    <div style="font-size:28px; font-weight:700; color:var(--green-dark);"><?= number_format($counts['dp']) ?></div>
+                <div class="setting-card">
+                    <div class="label">Delivery Proofs</div>
+                    <div class="value"><?= number_format($counts['dp']) ?></div>
                 </div>
             </div>
         </div>
@@ -129,16 +129,16 @@ $counts = $pdo->query("
             <?php if (!$logs): ?>
                 <p class="text-muted">No activity recorded yet.</p>
             <?php else: ?>
-                <div style="display:flex; flex-direction:column; gap:10px;">
+                <div style="display:flex; flex-direction:column; gap:12px;">
                     <?php foreach ($logs as $l): ?>
-                        <div style="padding:14px; background:#fff; border:1px solid var(--gray-100); border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+                        <div style="padding:16px; background:#fff; border:1px solid var(--gray-100); border-radius:8px; display:flex; justify-content:space-between; align-items:center; box-shadow: 0 2px 4px rgba(0,0,0,.02);">
                             <div>
                                 <strong><?= sanitize($l['user_name'] ?: 'System') ?></strong> changed 
                                 <strong><?= sanitize($l['food_name']) ?></strong> 
                                 from <span class="badge badge-gray"><?= sanitize($l['old_status'] ?: 'new') ?></span> 
                                 to <span class="badge badge-blue"><?= sanitize($l['new_status']) ?></span>
                             </div>
-                            <small class="text-muted"><?= time_ago($l['created_at']) ?></small>
+                            <small class="text-muted" style="font-size:12px;"><?= time_ago($l['created_at']) ?></small>
                         </div>
                     <?php endforeach; ?>
                 </div>
@@ -147,29 +147,44 @@ $counts = $pdo->query("
 
         <!-- TAB: Security -->
         <div id="tab-security" class="settings-tab" style="display:none;">
-            <h2 class="settings-section-title">Security</h2>
+            <h2 class="settings-section-title">Security Audit</h2>
             <p style="color:var(--gray-500); font-size:14px; margin-bottom:24px;">System security settings and best practices.</p>
 
             <div style="display:flex; flex-direction:column; gap:16px;">
-                <div style="padding:16px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px;">
-                    <h4 style="color:#166534; margin-bottom:4px;">✅ Password Hashing</h4>
-                    <p style="font-size:13px; color:#15803D;">All passwords use bcrypt (PASSWORD_DEFAULT). Plain-text passwords are never stored.</p>
+                <div style="padding:20px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px; display:flex; gap:16px;">
+                    <div style="font-size:24px;">✅</div>
+                    <div>
+                        <h4 style="color:#166534; margin-bottom:4px; font-size:16px;">Password Hashing</h4>
+                        <p style="font-size:14px; color:#15803D; margin:0;">All passwords use bcrypt (PASSWORD_DEFAULT). Plain-text passwords are never stored.</p>
+                    </div>
                 </div>
-                <div style="padding:16px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px;">
-                    <h4 style="color:#166534; margin-bottom:4px;">✅ CSRF Protection</h4>
-                    <p style="font-size:13px; color:#15803D;">All POST forms use CSRF tokens. Cross-site request forgery is blocked.</p>
+                <div style="padding:20px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px; display:flex; gap:16px;">
+                    <div style="font-size:24px;">✅</div>
+                    <div>
+                        <h4 style="color:#166534; margin-bottom:4px; font-size:16px;">CSRF Protection</h4>
+                        <p style="font-size:14px; color:#15803D; margin:0;">All POST forms use CSRF tokens. Cross-site request forgery is blocked.</p>
+                    </div>
                 </div>
-                <div style="padding:16px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px;">
-                    <h4 style="color:#166534; margin-bottom:4px;">✅ SQL Injection Prevention</h4>
-                    <p style="font-size:13px; color:#15803D;">PDO prepared statements are used everywhere. User input is never concatenated into SQL.</p>
+                <div style="padding:20px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px; display:flex; gap:16px;">
+                    <div style="font-size:24px;">✅</div>
+                    <div>
+                        <h4 style="color:#166534; margin-bottom:4px; font-size:16px;">SQL Injection Prevention</h4>
+                        <p style="font-size:14px; color:#15803D; margin:0;">PDO prepared statements are used everywhere. User input is never concatenated into SQL.</p>
+                    </div>
                 </div>
-                <div style="padding:16px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px;">
-                    <h4 style="color:#166534; margin-bottom:4px;">✅ Secure File Uploads</h4>
-                    <p style="font-size:13px; color:#15803D;">MIME type validated, files renamed randomly, size limit enforced.</p>
+                <div style="padding:20px; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px; display:flex; gap:16px;">
+                    <div style="font-size:24px;">✅</div>
+                    <div>
+                        <h4 style="color:#166534; margin-bottom:4px; font-size:16px;">Secure File Uploads</h4>
+                        <p style="font-size:14px; color:#15803D; margin:0;">MIME type validated, files renamed randomly, size limit enforced.</p>
+                    </div>
                 </div>
-                <div style="padding:16px; background:#FEF3C7; border:1px solid #FDE68A; border-radius:8px;">
-                    <h4 style="color:#92400E; margin-bottom:4px;">⚠️ Change Default Admin Password</h4>
-                    <p style="font-size:13px; color:#92400E;">If you're still using <code>password123</code>, update it now via phpMyAdmin.</p>
+                <div style="padding:20px; background:#FEF3C7; border:1px solid #FDE68A; border-radius:8px; display:flex; gap:16px; margin-top:10px;">
+                    <div style="font-size:24px;">⚠️</div>
+                    <div>
+                        <h4 style="color:#92400E; margin-bottom:4px; font-size:16px;">Change Default Admin Password</h4>
+                        <p style="font-size:14px; color:#92400E; margin:0;">If you're still using <code>password123</code>, update it now via phpMyAdmin.</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -179,11 +194,8 @@ $counts = $pdo->query("
 
 <script>
 function showTab(tabId, link) {
-    // Hide all tabs
     document.querySelectorAll('.settings-tab').forEach(t => t.style.display = 'none');
-    // Show selected
     document.getElementById('tab-' + tabId).style.display = 'block';
-    // Update active nav
     document.querySelectorAll('.settings-nav a').forEach(a => a.classList.remove('active'));
     link.classList.add('active');
 }
