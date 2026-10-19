@@ -98,16 +98,28 @@ $__avatarPhoto = $__avatarStmt->fetchColumn() ?: null;
     <title><?= sanitize($__pageTitle) ?> — <?= SITE_NAME ?></title>
     <link rel="icon" href="<?= BASE_URL ?>assets/images/logo.png">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Core Styles -->
     <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/style.css">
     <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/dashboard.css">
     <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/responsive.css">
+    
+    <!-- Load Advanced User Theme ONLY for non-admin modules -->
+    <?php if (strpos($_SERVER['PHP_SELF'], '/admin/') === false): ?>
+        <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/user-advanced.css">
+    <?php endif; ?>
+
+    <!-- Admin Specific Styles -->
+    <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+    
     <?php if (!empty($extraCss)) foreach ((array)$extraCss as $c): ?>
         <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/<?= sanitize($c) ?>">
-    <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/admin.css">
     <?php endforeach; ?>
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+
+    <!-- Scripts (jQuery + DataTables) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
 </head>
 <body>
 <div class="dash">
