@@ -241,3 +241,77 @@
 }
 input:checked + .slider { background-color: var(--green); }
 input:checked + .slider:before { transform: translateX(22px); }
+/* ================================
+   Advanced Admin Profile & Settings
+   ================================ */
+
+/* Settings Layout */
+.settings-container {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 30px;
+    margin-top: 20px;
+}
+@media (max-width: 900px) { .settings-container { grid-template-columns: 1fr; } }
+
+.settings-nav {
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+    display: flex; flex-direction: column; gap: 5px;
+    height: fit-content;
+}
+.settings-nav a {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px; border-radius: 8px;
+    color: var(--gray-700); font-weight: 600; font-size: 14px;
+    text-decoration: none; transition: all 0.2s;
+}
+.settings-nav a:hover { background: var(--gray-50); color: var(--green-dark); }
+.settings-nav a.active { background: var(--green-light); color: var(--green-dark); border-left: 4px solid var(--green); }
+
+.settings-content {
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 40px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+}
+.settings-section-title {
+    font-size: 22px; font-weight: 700; color: var(--gray-900);
+    margin-bottom: 25px; padding-bottom: 15px;
+    border-bottom: 1px solid var(--gray-100);
+}
+
+/* Modern Toggles */
+.toggle-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 0; border-bottom: 1px solid var(--gray-100);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-info h4 { font-size: 16px; font-weight: 600; color: var(--gray-900); margin-bottom: 6px; }
+.toggle-info p { font-size: 14px; color: var(--gray-500); }
+
+.switch { position: relative; display: inline-block; width: 50px; height: 28px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #ccc; transition: .4s; border-radius: 34px;
+}
+.slider:before {
+    position: absolute; content: ""; height: 20px; width: 20px;
+    left: 4px; bottom: 4px; background-color: white;
+    transition: .4s; border-radius: 50%;
+}
+input:checked + .slider { background-color: var(--green); }
+input:checked + .slider:before { transform: translateX(22px); }
+
+/* Settings Cards inside Grid */
+.setting-card {
+    background: var(--gray-50);
+    padding: 24px; border-radius: 12px;
+    border: 1px solid var(--gray-100);
+    text-align: center;
+}
+.setting-card .label { font-size: 12px; text-transform: uppercase; color: var(--gray-500); font-weight: 700; letter-spacing: 0.5px; margin-bottom: 8px; }
+.setting-card .value { font-size: 32px; font-weight: 700; color: var(--green-dark); }
