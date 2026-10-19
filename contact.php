@@ -2,6 +2,7 @@
 // contact.php
 $pageTitle = 'Contact Us';
 require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/mailer.php'; // <-- ADDED HERE: Loads the mailer
 
 $success = false;
 $errors  = [];
@@ -13,23 +14,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $message = post('message');
 
     // Validation
-    if ($name === '') {
-        $errors[] = 'Please enter your name.';
-    }
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $errors[] = 'Please enter a valid email address.';
-    }
-    if ($message === '') {
-        $errors[] = 'Please enter a message.';
-    }
+    if ($name === '') $errors[] = 'Please enter your name.';
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Please enter a valid email address.';
+    if ($message === '') $errors[] = 'Please enter a message.';
 
-    // Save to database
     if (!$errors) {
         try {
+            // 1. Save to Database
             $stmt = $pdo->prepare("INSERT INTO contact_messages (name, email, message) VALUES (:n, :e, :m)");
             $stmt->execute([':n' => $name, ':e' => $email, ':m' => $message]);
             
-            set_flash('success', 'Thank you! Your message has been sent successfully. We will get back to you soon.');
+            // 2. Send Email (ADDED HERE)
+            $adminEmail = 'your_email@gmail.com'; // <-- PUT YOUR EMAIL HERE
+            $subject = "New Contact Message from " . $name;
+            $body = "<h3>New Message from FoodShare</h3>
+                     <p><strong>Name:</strong> $name</p>
+                     <p><strong>Email:</strong> $email</p>
+                     <p><strong>Message:</strong><br>$message</p>";
+            
+            // This calls the function from mailer.php
+            send_email_notification($adminEmail, $subject, $body);
+            // ------------------
+
+            set_flash('success', 'Thank you! Your message has been sent. We will check our email and reply soon.');
             redirect(BASE_URL . 'contact.php');
         } catch (Exception $ex) {
             $errors[] = 'Something went wrong. Please try again later.';
@@ -59,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="contact-card">
                     <div class="helper-icon">📞</div>
                     <h3>Call Us</h3>
-                    <p>+91 9874501236</p>
+                    <p>+91 98765 43210</p>
                 </div>
             </div>
 
