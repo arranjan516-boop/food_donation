@@ -16,9 +16,12 @@ if (!$donationId) {
 // 1. Fetch Donation and Recipient Info
 $stmt = $pdo->prepare("
     SELECT d.*, 
-           (SELECT recipient_id FROM food_requests WHERE donation_id = d.donation_id AND status IN ('accepted','completed') LIMIT 1) AS recipient_id
+           fr.request_id AS accepted_request_id,
+           fr.recipient_id
     FROM food_donations d
+    LEFT JOIN food_requests fr ON fr.donation_id = d.donation_id AND fr.status IN ('accepted','completed')
     WHERE d.donation_id = :id
+    LIMIT 1
 ");
 $stmt->execute([':id' => $donationId]);
 $d = $stmt->fetch();
@@ -71,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// 3. Fetch Messages (FIXED: Using :u1 and :u2 to avoid duplicate placeholder error)
+// 3. Fetch Messages
 $msgs = $pdo->prepare("
     SELECT m.*, u.name AS sender_name, u.role AS sender_role
     FROM messages m
@@ -101,7 +104,9 @@ $backUrl = BASE_URL . 'index.php';
 if ($isDonor) {
     $backUrl = BASE_URL . 'donor/donation-details.php?id=' . $donationId;
 } elseif ($isRecipient) {
-    $backUrl = BASE_URL . 'recipient/request-details.php?id=' . $d['request_id'];
+    // Safely fallback if request_id is somehow missing
+    $reqId = $d['accepted_request_id'] ?? 0;
+    $backUrl = BASE_URL . 'recipient/request-details.php?id=' . $reqId;
 } elseif ($isAdmin) {
     $backUrl = BASE_URL . 'admin/donations/view.php?id=' . $donationId;
 }
