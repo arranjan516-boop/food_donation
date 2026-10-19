@@ -135,8 +135,14 @@ $problem = $pr->fetch();
 <!-- =============== RECIPIENT INFO PANEL (visible after Stage 1) =============== -->
 <?php if ($acceptedRecipient): ?>
 <div class="card mb-3" style="border-left:4px solid var(--green);background:#F1F8E9">
-    <h3 class="card-title" style="color:var(--green-dark)">📦 Delivery Destination — Recipient Details</h3>
-    <p class="text-muted" style="font-size:13px;margin-top:-6px">
+    <div class="flex-between mb-2">
+        <h3 class="card-title" style="color:var(--green-dark); margin:0;">📦 Delivery Destination — Recipient Details</h3>
+        <!-- CHAT BUTTON ADDED HERE -->
+        <a href="<?= BASE_URL ?>chat.php?donation_id=<?= $id ?>" class="btn btn-primary btn-sm">
+            💬 Chat with Recipient
+        </a>
+    </div>
+    <p class="text-muted" style="font-size:13px;margin-top:-6px; margin-bottom:16px;">
         Share this with the assigned collector/NGO so they can deliver the food.
     </p>
 
