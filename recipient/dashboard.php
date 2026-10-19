@@ -1,6 +1,7 @@
 <?php
 // recipient/dashboard.php
 $pageTitle = 'Recipient Dashboard';
+$extraCss = ['food-grid.css'];
 require_once __DIR__ . '/../includes/dashboard-header.php';
 require_once __DIR__ . '/../includes/location-functions.php';
 
