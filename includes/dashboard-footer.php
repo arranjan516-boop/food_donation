@@ -9,10 +9,12 @@
 </script>
 <script src="<?= BASE_URL ?>assets/js/script.js"></script>
 <script src="<?= BASE_URL ?>assets/js/notification.js"></script>
-<?php if (!empty($extraJs)) foreach ((array)$extraJs as $j): ?>
-    <script src="<?= BASE_URL ?>assets/js/<?= sanitize($j) ?>"></script>
-<?php endforeach; ?>
-        <script>
+
+<?php 
+// Only load DataTables on Admin pages
+if (strpos($_SERVER['PHP_SELF'], '/admin/') !== false): 
+?>
+<script>
 $(document).ready(function() {
     if ($.fn.DataTable) {
         $('table.table').each(function() {
@@ -32,5 +34,10 @@ $(document).ready(function() {
     }
 });
 </script>
+<?php endif; ?>
+
+<?php if (!empty($extraJs)) foreach ((array)$extraJs as $j): ?>
+    <script src="<?= BASE_URL ?>assets/js/<?= sanitize($j) ?>"></script>
+<?php endforeach; ?>
 </body>
 </html>
