@@ -8,7 +8,61 @@
     const BASE_URL = "<?= BASE_URL ?>";
 </script>
 <script src="<?= BASE_URL ?>assets/js/script.js"></script>
-<script src="<?= BASE_URL ?>assets/js/notification.js"></script>
+
+<script>
+    // ==========================================
+    // LIVE NOTIFICATION POLLING
+    // ==========================================
+    document.addEventListener('DOMContentLoaded', () => {
+        const bell = document.querySelector('.bell');
+        if (!bell) return;
+
+        // Function to fetch the latest count from the database
+        async function updateBellCount() {
+            try {
+                const response = await fetch(BASE_URL + 'api/check-notifications.php');
+                if (!response.ok) return;
+                
+                const data = await response.json();
+                let badge = bell.querySelector('.count');
+
+                if (data.count > 0) {
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.className = 'count';
+                        bell.appendChild(badge);
+                    }
+                    // Only animate if the number increased
+                    if (badge.textContent != data.count) {
+                        badge.textContent = data.count;
+                        badge.style.animation = 'none';
+                        badge.offsetHeight; /* trigger reflow */
+                        badge.style.animation = 'pop 0.3s ease-out';
+                    }
+                } else {
+                    if (badge) badge.remove();
+                }
+            } catch (error) {
+                // Silently fail if network is down
+            }
+        }
+
+        // Check immediately on page load
+        updateBellCount();
+
+        // Then check every 10 seconds automatically
+        setInterval(updateBellCount, 10000);
+    });
+</script>
+
+<style>
+    /* Animation for the bell popping */
+    @keyframes pop {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.4); }
+        100% { transform: scale(1); }
+    }
+</style>
 
 <?php 
 // Only load DataTables on Admin pages
