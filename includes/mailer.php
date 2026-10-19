@@ -10,7 +10,7 @@ require_once __DIR__ . '/../src/SMTP.php';
 function send_email_notification($toEmail, $subject, $body) {
     // --- CONFIGURE YOUR GMAIL HERE ---
     $smtpUser = 'arranjan5714@gmail.com';      // <-- Your Gmail address
-    $smtpPass = 'Fu.ryZa@5714!!';          // <-- 16-char App Password (NO spaces)
+    $smtpPass = 'xoglpkjtskaiuctv';          // <-- 16-char App Password (NO spaces)
     // ----------------------------------
 
     $mail = new PHPMailer(true);
@@ -23,7 +23,7 @@ function send_email_notification($toEmail, $subject, $body) {
         $mail->Username   = $smtpUser;
         $mail->Password   = $smtpPass;
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        $mail->Port       = 587;
+        $mail->Port       = 465;
 
         // --- TURN ON DEBUGGING ---
         // This will print the connection details to the screen. 
