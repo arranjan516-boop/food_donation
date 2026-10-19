@@ -86,6 +86,17 @@ $pf = $pdo->prepare("
 ");
 $pf->execute([':id' => $id]);
 $proof = $pf->fetch();
+
+// Fetch problem report if any
+$pr = $pdo->prepare("
+    SELECT pr.*, u.name AS reporter_name 
+    FROM problem_reports pr 
+    JOIN users u ON u.user_id = pr.reported_by 
+    WHERE pr.donation_id = :id 
+    ORDER BY pr.created_at DESC LIMIT 1
+");
+$pr->execute([':id' => $id]);
+$problem = $pr->fetch();
 ?>
 
 <?php if (!in_array($d['status'], ['completed','cancelled','expired'], true)): ?>
@@ -134,8 +145,7 @@ $proof = $pf->fetch();
         <div><strong>Phone:</strong>
             <?php if ($acceptedRecipient['recipient_phone']): ?>
                 <a href="tel:<?= sanitize($acceptedRecipient['recipient_phone']) ?>"><?= sanitize($acceptedRecipient['recipient_phone']) ?></a>
-            <a href="<?= BASE_URL ?>chat.php?donation_id=<?= $id ?>" class="btn btn-primary btn-sm mt-2">💬 Chat with Recipient</a>
-    <?php else: ?>—<?php endif; ?>
+            <?php else: ?>—<?php endif; ?>
         </div>
         <div><strong>Email:</strong> <?= sanitize($acceptedRecipient['recipient_email'] ?: '—') ?></div>
         <div style="grid-column:1/-1">
@@ -146,6 +156,27 @@ $proof = $pf->fetch();
             <?= $acceptedRecipient['recipient_pincode'] ? ' - ' . sanitize($acceptedRecipient['recipient_pincode']) : '' ?>
         </div>
     </div>
+</div>
+<?php endif; ?>
+
+<!-- =============== PROBLEM REPORT PANEL =============== -->
+<?php if ($problem): ?>
+<div class="card mb-3" style="border-left: 4px solid var(--red); background: #FFEBEE;">
+    <div class="flex-between mb-2">
+        <h3 class="card-title" style="color: var(--red); margin:0;">⚠️ Problem Reported by Recipient</h3>
+        <?= status_badge($problem['status']) ?>
+    </div>
+    <p><strong><?= sanitize($problem['reporter_name']) ?></strong> reported on <?= date('d M Y, h:i A', strtotime($problem['created_at'])) ?>:</p>
+    <p style="font-size:15px; padding:12px; background:#fff; border-radius:8px; border:1px solid #ffcdd2;">
+        "<?= nl2br(sanitize($problem['description'])) ?>"
+    </p>
+    <?php if ($problem['evidence_image']): ?>
+        <p style="margin-top:12px;"><strong>Evidence:</strong></p>
+        <img src="<?= PROOF_UPLOAD_URL . rawurlencode($problem['evidence_image']) ?>" style="max-width:200px;border-radius:8px; margin-top:6px;" alt="Evidence">
+    <?php endif; ?>
+    <?php if ($problem['admin_note']): ?>
+        <p style="margin-top:12px; padding-top:12px; border-top:1px solid #ffcdd2;"><strong>Admin Response:</strong> <?= nl2br(sanitize($problem['admin_note'])) ?></p>
+    <?php endif; ?>
 </div>
 <?php endif; ?>
 
@@ -303,6 +334,7 @@ $proof = $pf->fetch();
     <h3 class="card-title">📷 Delivery Proof</h3>
     <p><strong>Uploaded by:</strong> <?= sanitize($proof['uploader_name']) ?> (<?= sanitize($proof['uploaded_by_role']) ?>)</p>
     <p><strong>Date:</strong> <?= date('d M Y, h:i A', strtotime($proof['uploaded_at'])) ?></p>
+    <?php if ($proof['delivery_note']): ?><p><strong>Note:</strong> <?= sanitize($proof['delivery_note']) ?></p><?php endif; ?>
     <img src="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>" style="max-width:280px;border-radius:12px;margin-top:10px" alt="">
 </div>
 <?php endif; ?>
