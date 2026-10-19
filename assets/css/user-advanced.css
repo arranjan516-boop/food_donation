@@ -1,0 +1,200 @@
+/* ================================
+   FoodShare — Advanced User Theme
+   ================================ */
+
+/* Modern Page Background */
+body {
+    background-color: #F4F7F6;
+}
+
+/* Modern Cards */
+.card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.04);
+    border: 1px solid rgba(0,0,0,0.02);
+    padding: 30px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.card:hover {
+    box-shadow: 0 12px 32px rgba(0,0,0,0.08);
+}
+.card-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--gray-100);
+}
+
+/* Stats Cards - Gradient Upgrade */
+.stat-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.03);
+    border: none;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s;
+}
+.stat-card:hover {
+    transform: translateY(-4px);
+}
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 80px; height: 80px;
+    background: currentColor;
+    opacity: 0.03;
+    border-radius: 50%;
+    transform: translate(30%, -30%);
+}
+.stat-card .icon-box {
+    width: 56px; height: 56px;
+    border-radius: 14px;
+    font-size: 24px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.stat-card .stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--gray-900);
+    line-height: 1.1;
+}
+.stat-card .stat-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+
+/* Modern Tables */
+.table-card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.04);
+    overflow: hidden;
+    border: 1px solid rgba(0,0,0,0.02);
+}
+.table-card-header {
+    padding: 24px 30px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.table-card-header h3 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin: 0;
+}
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.table th {
+    background: #F9FAFB;
+    padding: 16px 30px;
+    text-align: left;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--gray-500);
+    font-weight: 700;
+    border-bottom: 1px solid var(--gray-100);
+}
+.table td {
+    padding: 20px 30px;
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 14px;
+    color: var(--gray-700);
+    vertical-align: middle;
+}
+.table tr:last-child td {
+    border-bottom: none;
+}
+.table tr:hover td {
+    background: #F8FAFC;
+}
+
+/* Modern Food Cards (Recipient/Donor) */
+.food-card {
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.04);
+    border: 1px solid rgba(0,0,0,0.02);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.food-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.08);
+}
+.food-card img {
+    height: 180px;
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+}
+.food-card-body {
+    padding: 20px;
+}
+.food-card-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--gray-900);
+}
+
+/* Badges - Modern Style */
+.badge {
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Buttons - Modern Style */
+.btn {
+    border-radius: 10px;
+    padding: 12px 24px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+.btn-primary {
+    background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
+    box-shadow: 0 4px 12px rgba(46, 125, 50, 0.2);
+}
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(46, 125, 50, 0.3);
+}
+
+/* Form Inputs */
+.form-control {
+    padding: 14px 18px;
+    border-radius: 10px;
+    border: 1.5px solid var(--gray-300);
+    background: #F9FAFB;
+}
+.form-control:focus {
+    background: #fff;
+    border-color: var(--green);
+    box-shadow: 0 0 0 4px rgba(46, 125, 50, 0.1);
+}
+.form-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
