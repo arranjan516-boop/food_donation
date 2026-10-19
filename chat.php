@@ -104,7 +104,6 @@ $backUrl = BASE_URL . 'index.php';
 if ($isDonor) {
     $backUrl = BASE_URL . 'donor/donation-details.php?id=' . $donationId;
 } elseif ($isRecipient) {
-    // Safely fallback if request_id is somehow missing
     $reqId = $d['accepted_request_id'] ?? 0;
     $backUrl = BASE_URL . 'recipient/request-details.php?id=' . $reqId;
 } elseif ($isAdmin) {
@@ -158,19 +157,20 @@ require_once __DIR__ . '/includes/dashboard-header.php';
 </script>
 
 <style>
-.chat-layout { max-width: 800px; margin: 0 auto; }
-.chat-header { background: #fff; padding: 20px; border-radius: 12px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.05); display: flex; justify-content: space-between; align-items: center; }
-.chat-window { background: #fff; border-radius: 12px; padding: 20px; height: 480px; overflow-y: auto; box-shadow: 0 2px 8px rgba(0,0,0,.05); margin-bottom: 16px; display: flex; flex-direction: column; gap: 12px; }
+.chat-layout { max-width: 800px; margin: 0 auto; height: calc(100vh - 120px); display: flex; flex-direction: column; }
+.chat-header { background: #fff; padding: 20px 24px; border-radius: 16px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,.03); display: flex; justify-content: space-between; align-items: center; }
+.chat-window { background: #fff; border-radius: 16px; padding: 24px; flex: 1; overflow-y: auto; box-shadow: 0 4px 15px rgba(0,0,0,.03); margin-bottom: 20px; display: flex; flex-direction: column; gap: 16px; }
 .chat-msg { display: flex; }
 .chat-msg.mine { justify-content: flex-end; }
 .chat-msg.theirs { justify-content: flex-start; }
-.chat-bubble { max-width: 75%; padding: 10px 14px; border-radius: 12px; }
+.chat-bubble { max-width: 70%; padding: 14px 18px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
 .chat-msg.mine .chat-bubble { background: var(--green); color: #fff; border-bottom-right-radius: 4px; }
 .chat-msg.theirs .chat-bubble { background: #F3F4F6; color: var(--gray-900); border-bottom-left-radius: 4px; }
-.chat-bubble small { opacity: .8; font-size: 11px; }
-.chat-bubble p { margin: 4px 0 0; font-size: 14px; }
-.chat-input { display: flex; gap: 10px; background: #fff; padding: 12px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.05); }
-.chat-input .form-control { flex: 1; }
+.chat-bubble small { opacity: .8; font-size: 11px; display: block; margin-bottom: 4px; }
+.chat-bubble p { margin: 0; font-size: 15px; line-height: 1.4; }
+.chat-input { display: flex; gap: 12px; background: #fff; padding: 12px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,.03); }
+.chat-input .form-control { flex: 1; border-radius: 10px; background: #F9FAFB; border: 1px solid #eee; }
+.chat-input .btn { border-radius: 10px; padding: 0 24px; }
 </style>
 
 <?php require_once __DIR__ . '/includes/dashboard-footer.php'; ?>
