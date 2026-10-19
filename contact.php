@@ -54,12 +54,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="contact-card">
                     <div class="helper-icon">📧</div>
                     <h3>Email Us</h3>
-                    <p>manojar346@gmail.com</p>
+                    <p>arranjan5714@gmail.com</p>
                 </div>
                 <div class="contact-card">
                     <div class="helper-icon">📞</div>
                     <h3>Call Us</h3>
-                    <p>+91 94828 32066</p>
+                    <p>+91 9874501236</p>
                 </div>
             </div>
 
