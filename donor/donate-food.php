@@ -47,16 +47,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $old['pref_ngo']       = isset($_POST['pref_ngo'])       ? 1 : 0;
     $old['allow_partial_request'] = isset($_POST['allow_partial_request']) ? 1 : 0;
 
+    // ---- Basic Validation (No cross-checking between quantity and people) ----
     if ($old['food_name'] === '')  $errors[] = 'Food name is required.';
     if ($old['quantity'] === '' || (float)$old['quantity'] <= 0) $errors[] = 'Valid quantity is required.';
     if ($old['people_served'] === '' || (int)$old['people_served'] <= 0) $errors[] = 'Number of people served is required.';
     if ($old['city'] === '')       $errors[] = 'City is required for 15 KM matching.';
     if ($old['pincode'] === '')    $errors[] = 'Pincode is required.';
     if ($old['best_before'] === '')$errors[] = 'Best-before time is required.';
+    
     if (!$old['pref_self'] && !$old['pref_collector'] && !$old['pref_ngo']) {
         $errors[] = 'Select at least one delivery option (self / collector / NGO).';
     }
 
+    // ---- Image Upload ----
     $photoName = null;
     if (!empty($_FILES['food_photo']['name'])) {
         $photoName = upload_image($_FILES['food_photo'], FOOD_UPLOAD, FOOD_UPLOAD_URL);
@@ -65,12 +68,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Food photo is required.';
     }
 
+    // ---- Delivery Preference Logic ----
     $pref = 'any';
     if ($old['pref_collector'] && !$old['pref_self'] && !$old['pref_ngo']) $pref = 'collector';
     elseif ($old['pref_self'] && !$old['pref_collector'] && !$old['pref_ngo']) $pref = 'self_delivery';
     elseif ($old['pref_ngo'] && !$old['pref_self'] && !$old['pref_collector']) $pref = 'ngo';
     if (($old['pref_self'] + $old['pref_collector'] + $old['pref_ngo']) > 1) $pref = 'any';
 
+    // ---- Insert Data ----
     if (!$errors) {
         $sql = "INSERT INTO food_donations
             (donor_id, food_name, food_category, description, quantity, unit,
@@ -109,10 +114,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $donationId = (int)$pdo->lastInsertId();
 
+        // Log History
         $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by)
                        VALUES (:d, NULL, 'available', :u)")
             ->execute([':d' => $donationId, ':u' => $uid]);
 
+        // Notify Recipients (within 15 KM)
         if ($old['latitude'] !== '' && $old['longitude'] !== '') {
             $lat = (float)$old['latitude'];
             $lng = (float)$old['longitude'];
@@ -121,20 +128,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '🍱 New Food Donation',
                 $old['people_served'] . ' meals available: ' . $old['food_name'],
                 'new_donation', $donationId);
-
-            if ($old['pref_collector'] || $pref === 'any') {
-                notify_nearby_role($pdo, 'collector', $lat, $lng,
-                    '🚴 New Pickup Available',
-                    'A donor near you needs food collection: ' . $old['food_name'],
-                    'new_pickup', $donationId);
-            }
-
-            if ($old['pref_ngo'] || $pref === 'any') {
-                notify_nearby_role($pdo, 'ngo', $lat, $lng,
-                    '🏢 New Donation Available',
-                    'New donation in your area: ' . $old['food_name'],
-                    'new_donation', $donationId);
-            }
         }
 
         notify_admins($pdo, '📦 New Donation Posted',
@@ -159,7 +152,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
-<form method="post" enctype="multipart/form-data" class="card" data-validate>
+<form method="post" enctype="multipart/form-data" class="card">
     <?= csrf_field() ?>
 
     <h3 class="card-title">Food Details</h3>
@@ -187,7 +180,8 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="form-row">
         <div class="form-group">
             <label class="form-label">Quantity *</label>
-            <input type="number" step="0.1" min="0.1" name="quantity" class="form-control" required value="<?= sanitize($old['quantity']) ?>">
+            <!-- Removed min/max limits so any number is accepted -->
+            <input type="number" step="any" name="quantity" class="form-control" required value="<?= sanitize($old['quantity']) ?>">
         </div>
         <div class="form-group">
             <label class="form-label">Unit</label>
@@ -210,7 +204,8 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         </div>
         <div class="form-group">
             <label class="form-label">Number of People Served *</label>
-            <input type="number" min="1" name="people_served" class="form-control" required value="<?= sanitize($old['people_served']) ?>">
+            <!-- Removed min/max limits and JS 'data-validate' so any number is accepted -->
+            <input type="number" name="people_served" class="form-control" required value="<?= sanitize($old['people_served']) ?>">
         </div>
     </div>
 
