@@ -16,14 +16,10 @@ $taskId = int_get('id');
 $stmt = $pdo->prepare("
     SELECT ct.*, d.donation_id, d.donor_id, d.food_name, d.food_photo, d.unit, d.quantity, d.people_served,
            d.address AS pickup_address, d.area AS pickup_area, d.city AS pickup_city,
-           d.latitude AS pickup_lat, d.longitude AS pickup_lng,
-           d.best_before,
            u.name AS donor_name, u.phone AS donor_phone,
            fr.request_id, fr.recipient_id, fr.contact_number AS recipient_contact,
-           fr.delivery_address AS recipient_delivery_address,
            ru.name AS recipient_name, ru.phone AS recipient_phone,
-           ru.city AS recipient_city, ru.area AS recipient_area, ru.address AS recipient_address,
-           ru.latitude AS recipient_lat, ru.longitude AS recipient_lng
+           ru.city AS recipient_city, ru.area AS recipient_area, ru.address AS recipient_address
     FROM collector_tasks ct
     JOIN food_donations d ON d.donation_id = ct.donation_id
     JOIN users u ON u.user_id = d.donor_id
@@ -47,6 +43,7 @@ $statusFlow = [
     'pickup_started' => ['picked_up',      '🍱 Food Collected'],
     'picked_up'      => ['delivering',     '🚚 Start Delivery'],
     'delivering'     => ['awaiting_proof', '📍 Reached Recipient'],
+    // Note: 'awaiting_proof' has no next step, because the next action is uploading the photo!
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -137,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("UPDATE collector_tasks SET status='delivered', delivery_time=NOW() WHERE task_id=:t")
                     ->execute([':t' => $taskId]);
 
-                // Update Donation to Delivered (Recipient will then confirm to make it 'completed')
+                // Update Donation to Delivered
                 $pdo->prepare("UPDATE food_donations SET status='delivered' WHERE donation_id=:d")
                     ->execute([':d' => $t['donation_id']]);
 
@@ -152,7 +149,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!empty($t['recipient_id'])) {
                     notify($pdo, (int)$t['recipient_id'], '🍱 Food Delivered', 'Your food has been delivered. Please confirm receipt.', 'delivered', $t['donation_id']);
                 }
-                notify_admins($pdo, '📷 Delivery Proof Uploaded', 'Collector uploaded proof for donation #' . $t['donation_id'], 'proof', $t['donation_id']);
 
                 set_flash('success', 'Delivery completed successfully!');
                 redirect(BASE_URL . 'collector/completed-tasks.php');
@@ -205,7 +201,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
-<!-- Delivery Proof Upload (Visible when delivering or awaiting proof) -->
+<!-- Delivery Proof Upload (Visible ONLY when the person is at the door and hasn't uploaded yet) -->
 <?php if (in_array($t['status'], ['delivering', 'awaiting_proof'], true) && !$hasProof): ?>
     <div class="card">
         <h3 class="card-title">📷 Upload Delivery Proof</h3>
