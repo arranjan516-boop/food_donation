@@ -10,7 +10,7 @@ $stmt = $pdo->prepare("
     JOIN food_donations d ON d.donation_id = ct.donation_id
     JOIN users u ON u.user_id = d.donor_id
     WHERE ct.collector_id = :u
-      AND ct.status IN ('accepted','pickup_started','picked_up','delivering','awaiting_proof')
+      AND ct.status IN ('pending', 'accepted','pickup_started','picked_up','delivering','awaiting_proof')
     ORDER BY ct.assigned_at DESC
 ");
 $stmt->execute([':u' => $uid]);
@@ -38,7 +38,13 @@ $rows = $stmt->fetchAll();
                     <td><?= sanitize($t['area'] ?: $t['city']) ?></td>
                     <td><?= status_badge($t['status']) ?></td>
                     <td><?= time_ago($t['assigned_at']) ?></td>
-                    <td><a href="<?= BASE_URL ?>collector/active-delivery.php?id=<?= (int)$t['task_id'] ?>" class="btn btn-primary btn-sm">Continue</a></td>
+                    <td>
+                        <?php if ($t['status'] === 'pending'): ?>
+                            <span class="badge badge-yellow">Waiting for Donor</span>
+                        <?php else: ?>
+                            <a href="<?= BASE_URL ?>collector/active-delivery.php?id=<?= (int)$t['task_id'] ?>" class="btn btn-primary btn-sm">Continue</a>
+                        <?php endif; ?>
+                    </td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
