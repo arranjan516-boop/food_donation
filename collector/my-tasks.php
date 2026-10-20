@@ -4,8 +4,21 @@ $pageTitle = 'My Tasks';
 require_once __DIR__ . '/../includes/dashboard-header.php';
 
 $uid = current_user_id();
+
+// AUTO-FIX: If the donation is completed, mark the collector task as completed too
+$pdo->exec("
+    UPDATE collector_tasks ct
+    JOIN food_donations d ON d.donation_id = ct.donation_id
+    SET ct.status = 'completed' 
+    WHERE ct.collector_id = $uid 
+      AND ct.status NOT IN ('completed', 'rejected', 'cancelled') 
+      AND d.status = 'completed'
+");
+
 $stmt = $pdo->prepare("
-    SELECT ct.*, d.food_name, d.food_photo, d.city, d.area, u.name AS donor_name
+    SELECT ct.*, d.food_name, d.food_photo, d.city, d.area, u.name AS donor_name,
+           d.status as donation_status,
+           (SELECT status FROM food_requests WHERE donation_id = d.donation_id AND status='accepted' LIMIT 1) as recipient_accepted
     FROM collector_tasks ct
     JOIN food_donations d ON d.donation_id = ct.donation_id
     JOIN users u ON u.user_id = d.donor_id
@@ -40,7 +53,15 @@ $rows = $stmt->fetchAll();
                     <td><?= time_ago($t['assigned_at']) ?></td>
                     <td>
                         <?php if ($t['status'] === 'pending'): ?>
-                            <span class="badge badge-yellow">Waiting for Donor</span>
+                            <span class="badge badge-yellow">⏳ Waiting for Donor</span>
+                            <br>
+                            <small class="text-muted" style="font-size:11px; display:block; margin-top:4px;">
+                                <?php if (!$t['recipient_accepted']): ?>
+                                    (Donor must accept a recipient first)
+                                <?php else: ?>
+                                    (Donor is reviewing your request)
+                                <?php endif; ?>
+                            </small>
                         <?php else: ?>
                             <a href="<?= BASE_URL ?>collector/active-delivery.php?id=<?= (int)$t['task_id'] ?>" class="btn btn-primary btn-sm">Continue</a>
                         <?php endif; ?>
