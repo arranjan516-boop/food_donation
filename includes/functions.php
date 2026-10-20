@@ -9,11 +9,9 @@ function sanitize($str) {
 }
 
 function redirect($path) {
-    // Discard any output accidentally printed (like hidden spaces or BOM)
     while (ob_get_level() > 0) {
         ob_end_clean();
     }
-    // Force the header
     if (!headers_sent()) {
         header('Location: ' . $path);
     }
@@ -85,7 +83,7 @@ function haversine_km($lat1, $lng1, $lat2, $lng2) {
     if ($lat1 === null || $lng1 === null || $lat2 === null || $lng2 === null) {
         return null;
     }
-    $R    = 6371; // Earth radius km
+    $R    = 6371;
     $dLat = deg2rad($lat2 - $lat1);
     $dLng = deg2rad($lng2 - $lng1);
     $a    = sin($dLat/2) ** 2
@@ -93,12 +91,10 @@ function haversine_km($lat1, $lng1, $lat2, $lng2) {
     return $R * 2 * atan2(sqrt($a), sqrt(1 - $a));
 }
 
-/* =====================  IMAGE UPLOAD (SECURE)  ===================== */
+/* =====================  IMAGE UPLOAD  ===================== */
 
 function upload_image($file, $destDir, $urlPrefix) {
-    if (!isset($file) || $file['error'] === UPLOAD_ERR_NO_FILE) {
-        return null;
-    }
+    if (!isset($file) || $file['error'] === UPLOAD_ERR_NO_FILE) return null;
     if ($file['error'] !== UPLOAD_ERR_OK) {
         set_flash('error', 'Upload failed (code ' . $file['error'] . ').');
         return null;
@@ -107,25 +103,21 @@ function upload_image($file, $destDir, $urlPrefix) {
         set_flash('error', 'Image too large (max 5 MB).');
         return null;
     }
-
     $tmp = $file['tmp_name'];
     if (!is_uploaded_file($tmp)) {
         set_flash('error', 'Invalid upload.');
         return null;
     }
-
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime  = $finfo->file($tmp);
     if (!in_array($mime, ALLOWED_IMAGE_MIME, true)) {
         set_flash('error', 'Only JPG, PNG, or WEBP images allowed.');
         return null;
     }
-
     if (getimagesize($tmp) === false) {
         set_flash('error', 'File is not a valid image.');
         return null;
     }
-
     $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
     if (!in_array($ext, ALLOWED_IMAGE_EXT, true)) {
         $ext = match ($mime) {
@@ -135,10 +127,8 @@ function upload_image($file, $destDir, $urlPrefix) {
             default      => 'jpg',
         };
     }
-
     $newName = date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
     $target  = rtrim($destDir, '/\\') . DIRECTORY_SEPARATOR . $newName;
-
     if (!move_uploaded_file($tmp, $target)) {
         set_flash('error', 'Could not save uploaded file.');
         return null;
@@ -182,12 +172,62 @@ function status_badge($status) {
     $text = ucwords(str_replace('_', ' ', $status));
     return "<span class='badge {$cls}'>{$text}</span>";
 }
-function auto_expire_stale_donations($pdo) {
-    try {
-        $pdo->exec("CALL expire_old_donations()");
-    } catch (Exception $e) { /* Silent fail */ }
-}
+
 function food_photo_url($photo) {
     if (!$photo) return BASE_URL . 'assets/images/default-food.jpg';
     return FOOD_UPLOAD_URL . rawurlencode($photo);
+}
+
+/* =====================  TIMELINE  ===================== */
+
+function render_timeline($currentStatus) {
+    $steps = [
+        'requested'             => ['📝', 'Requested'],
+        'accepted'              => ['✅', 'Accepted'],
+        'collector_assigned'    => ['🚴', 'Collector/NGO Assigned'],
+        'picked_up'             => ['📦', 'Picked Up'],
+        'out_for_delivery'      => ['🚚', 'Out for Delivery'],
+        'delivered'             => ['📍', 'Delivered'],
+        'completed'             => ['🏁', 'Completed']
+    ];
+
+    if ($currentStatus === 'ngo_assigned') {
+        $currentStatus = 'collector_assigned';
+    }
+    if ($currentStatus === 'pickup_scheduled') {
+        $currentStatus = 'collector_assigned';
+    }
+    if ($currentStatus === 'awaiting_proof') {
+        $currentStatus = 'out_for_delivery';
+    }
+
+    $keys = array_keys($steps);
+    $currentIndex = array_search($currentStatus, $keys);
+    
+    if ($currentIndex === false && !in_array($currentStatus, ['available', 'pending'])) {
+        if (in_array($currentStatus, ['cancelled', 'expired'])) {
+            echo "<div class='toast toast-error mb-3'>🚫 This donation is {$currentStatus}.</div>";
+            return;
+        }
+    }
+
+    echo '<div class="timeline-tracker">';
+    foreach ($steps as $key => $step) {
+        $index = array_search($key, $keys);
+        $class = '';
+        
+        if ($currentIndex !== false) {
+            if ($index < $currentIndex) {
+                $class = 'completed';
+            } elseif ($index === $currentIndex) {
+                $class = 'active';
+            }
+        }
+
+        echo '<div class="timeline-step ' . $class . '">';
+        echo '  <div class="timeline-icon">' . $step[0] . '</div>';
+        echo '  <div class="timeline-label">' . $step[1] . '</div>';
+        echo '</div>';
+    }
+    echo '</div>';
 }
