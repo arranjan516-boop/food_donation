@@ -38,13 +38,29 @@ $pf->execute([':r' => $t['request_id']]);
 $hasProof = $pf->fetch();
 
 $errors = [];
-$statusFlow = [
-    'accepted'       => ['pickup_started', '🚗 Start Pickup'],
-    'pickup_started' => ['picked_up',      '🍱 Food Collected'],
-    'picked_up'      => ['delivering',     '🚚 Start Delivery'],
-    'delivering'     => ['awaiting_proof', '📍 Reached Recipient'],
-    // Note: 'awaiting_proof' has no next step, because the next action is uploading the photo!
-];
+
+// Define button logic
+$showNextButton = false;
+$nextStatus = '';
+$nextButtonText = '';
+
+if ($t['status'] === 'accepted') {
+    $showNextButton = true;
+    $nextStatus = 'pickup_started';
+    $nextButtonText = '🚗 Start Pickup';
+} elseif ($t['status'] === 'pickup_started') {
+    $showNextButton = true;
+    $nextStatus = 'picked_up';
+    $nextButtonText = '🍱 Food Collected';
+} elseif ($t['status'] === 'picked_up') {
+    $showNextButton = true;
+    $nextStatus = 'delivering';
+    $nextButtonText = '🚚 Start Delivery';
+} elseif ($t['status'] === 'delivering') {
+    $showNextButton = true;
+    $nextStatus = 'awaiting_proof';
+    $nextButtonText = '📍 Reached Recipient';
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
@@ -52,10 +68,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // 1. Advance Status
     if ($action === 'advance') {
-        $cur = $t['status'];
-        if (isset($statusFlow[$cur])) {
-            $next = $statusFlow[$cur][0];
-            
+        $next = post('next_status');
+        
+        if ($next) {
             // Update Collector Task
             if ($next === 'picked_up') {
                 $pdo->prepare("UPDATE collector_tasks SET status=:s, pickup_time=NOW() WHERE task_id=:t")
@@ -80,11 +95,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Log History
             $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, :old, :new, :u)")
                 ->execute([':d' => $t['donation_id'], ':old' => $t['status'], ':new' => $next, ':u' => $uid]);
-
-            // Notify Recipient
-            if ($next === 'picked_up' && !empty($t['recipient_id'])) {
-                notify($pdo, (int)$t['recipient_id'], '🍱 Food Collected', 'Your food has been collected and is on the way.', 'delivery', $t['donation_id']);
-            }
 
             set_flash('success', 'Status updated.');
             redirect(BASE_URL . 'collector/active-delivery.php?id=' . $taskId);
@@ -144,7 +154,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->commit();
 
-                // Notifications
                 notify($pdo, (int)$t['donor_id'], '✅ Food Delivered', 'Your donated food has been delivered successfully.', 'delivered', $t['donation_id']);
                 if (!empty($t['recipient_id'])) {
                     notify($pdo, (int)$t['recipient_id'], '🍱 Food Delivered', 'Your food has been delivered. Please confirm receipt.', 'delivered', $t['donation_id']);
@@ -190,18 +199,19 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 </div>
 
 <!-- Next Step Button -->
-<?php if (isset($statusFlow[$t['status']])): ?>
+<?php if ($showNextButton): ?>
     <div class="card mb-3">
         <h3 class="card-title">Next Step</h3>
         <form method="post">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="advance">
-            <button class="btn btn-primary btn-lg"><?= $statusFlow[$t['status']][1] ?></button>
+            <input type="hidden" name="next_status" value="<?= $nextStatus ?>">
+            <button class="btn btn-primary btn-lg"><?= $nextButtonText ?></button>
         </form>
     </div>
 <?php endif; ?>
 
-<!-- Delivery Proof Upload (Visible ONLY when the person is at the door and hasn't uploaded yet) -->
+<!-- Delivery Proof Upload -->
 <?php if (in_array($t['status'], ['delivering', 'awaiting_proof'], true) && !$hasProof): ?>
     <div class="card">
         <h3 class="card-title">📷 Upload Delivery Proof</h3>
@@ -213,14 +223,12 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
             
             <div class="form-group">
                 <label class="form-label">Delivery Proof Photo *</label>
-                <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp"
-                       onchange="previewImage(this, document.getElementById('proof-preview'))">
-                <img id="proof-preview" style="display:none;max-width:260px;margin-top:10px;border-radius:10px">
+                <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
             </div>
 
             <div class="form-group">
                 <label class="form-label">Delivery Note (optional)</label>
-                <textarea name="delivery_note" class="form-control" rows="2" placeholder="e.g. Food delivered successfully to the recipient."></textarea>
+                <textarea name="delivery_note" class="form-control" rows="2" placeholder="e.g. Food delivered successfully."></textarea>
             </div>
 
             <button class="btn btn-primary btn-lg">Submit Delivery Proof</button>
