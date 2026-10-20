@@ -58,3 +58,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+
+$pageTitle = 'Active Delivery';
+require_once __DIR__ . '/../includes/dashboard-header.php';
+?>
+
+<div class="card mb-3">
+    <div class="flex-between mb-2">
+        <h2><?= sanitize($t['food_name']) ?></h2>
+        <?= status_badge($t['status']) ?>
+    </div>
+    <div class="details-grid">
+        <img src="<?= food_photo_url($t['food_photo']) ?>" alt="">
+        <div>
+            <h4>📍 Pickup From</h4>
+            <p><strong><?= sanitize($t['donor_name']) ?></strong> (<?= sanitize($t['donor_phone']) ?>)</p>
+            <p><?= sanitize($t['pickup_address']) ?>, <?= sanitize($t['pickup_area']) ?></p>
+        </div>
+    </div>
+</div>
+
+<!-- Visual Timeline -->
+<div class="card mb-3" style="padding: 20px;">
+    <?php render_timeline($t['status']); ?>
+</div>
+
+<?php if (isset($statusFlow[$t['status']])): ?>
+    <div class="card mb-3">
+        <h3 class="card-title">Next Step</h3>
+        <form method="post">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="advance">
+            <button class="btn btn-primary btn-lg"><?= $statusFlow[$t['status']][1] ?></button>
+        </form>
+    </div>
+<?php endif; ?>
+
+<style>
+.details-grid { display:grid; grid-template-columns: 260px 1fr; gap:20px; }
+@media (max-width: 700px) { .details-grid { grid-template-columns: 1fr; } }
+</style>
+
+<?php require_once __DIR__ . '/../includes/dashboard-footer.php'; ?>
