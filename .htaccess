@@ -1,1 +1,23 @@
+# ==========================================
+# FoodShare / FoodConnect - Apache Config
+# ==========================================
 
+# 1. Set the default starting page
+DirectoryIndex splash.php index.php
+
+# 2. Prevent directory listing (Security)
+Options -Indexes
+
+# 3. Basic Security Headers
+<IfModule mod_headers.c>
+    # Prevent clickjacking
+    Header set X-Frame-Options "SAMEORIGIN"
+    # Protect against XSS
+    Header set X-XSS-Protection "1; mode=block"
+</IfModule>
+
+# 4. Block access to sensitive files
+<FilesMatch "^(config\.php|database\.php|\.env|composer\.json|composer\.lock|\.git)">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
