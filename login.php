@@ -3,7 +3,6 @@
 $pageTitle = 'Login';
 require_once __DIR__ . '/includes/header.php';
 
-// If already logged in → redirect
 if (is_logged_in()) {
     redirect(dashboard_url_for_role(current_role()));
 }
@@ -33,14 +32,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (!password_verify($password, $user['password'])) {
             $error = 'Incorrect password.';
         } else {
+            $pdo->prepare("UPDATE users SET last_login = NOW() WHERE user_id = :u")
+                ->execute([':u' => $user['user_id']]);
+
             login_user($user);
-
-            // Update last login (optional — silent if column doesn't exist)
-            try {
-                $pdo->prepare("UPDATE users SET updated_at = NOW() WHERE user_id = :u")
-                    ->execute([':u' => $user['user_id']]);
-            } catch (Exception $e) { /* ignore */ }
-
             set_flash('success', 'Welcome back, ' . $user['name'] . '!');
             redirect(dashboard_url_for_role($user['role']));
         }
@@ -50,7 +45,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <section class="auth-section">
     <div class="auth-container auth-login">
-        <!-- Left: Form -->
         <div class="auth-form-wrap">
             <h1>Welcome Back!</h1>
             <p class="text-muted mb-3">Login to your account</p>
@@ -68,13 +62,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                            value="<?= sanitize($email) ?>" autofocus>
                 </div>
 
-               <div class="form-group">
-    <label class="form-label">Password</label>
-    <div class="password-wrap">
-        <input type="password" name="password" class="form-control" required>
-        <button type="button" class="password-toggle" onclick="togglePassword(this)" aria-label="Show password">👁</button>
-    </div>
-</div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <div class="password-wrap">
+                        <input type="password" name="password" class="form-control" required>
+                        <button type="button" class="password-toggle" onclick="togglePassword(this)" aria-label="Show password">👁</button>
+                    </div>
+                </div>
 
                 <div class="flex-between mb-2">
                     <label style="font-size:13px">
@@ -91,10 +85,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
         </div>
 
-        <!-- Right: Illustration -->
+        <!-- Right: Premium Animated Image -->
         <div class="auth-side">
-            <img src="<?= BASE_URL ?>assets/images/hero-food.jpg" alt="Good food brings people together">
-            <h2>Good Food Brings People Together.</h2>
+            <div class="auth-side-content">
+                <p class="auth-side-tagline">Good food brings people together</p>
+                <h2>Good Food Brings <br>People Together.</h2>
+                
+                <div class="auth-side-icons">
+                    <div class="floating-icon">🍱<span>Donate</span></div>
+                    <div class="floating-icon">🤝<span>Help</span></div>
+                    <div class="floating-icon">🚴<span>Deliver</span></div>
+                    <div class="floating-icon">🌱<span>Grow</span></div>
+                </div>
+            </div>
         </div>
     </div>
 </section>
