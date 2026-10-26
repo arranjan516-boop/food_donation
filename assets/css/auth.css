@@ -25,33 +25,111 @@
     padding: 34px 38px;
     border-radius: 16px;
     box-shadow: var(--shadow);
+    z-index: 2;
 }
 .auth-form-wrap h1 { font-size: 26px; color: var(--green-dark); margin-bottom: 6px; }
 
+/* ==========================================
+   PREMIUM RIGHT PANEL (Image + Overlay + Anim)
+   ========================================== */
 .auth-side {
-    background: linear-gradient(160deg, var(--green) 0%, var(--green-dark) 100%);
-    color: #fff;
+    position: relative;
     border-radius: 16px;
-    padding: 32px;
-    display: flex; flex-direction: column; justify-content: center;
-    text-align: center;
     overflow: hidden;
-}
-.auth-side img {
-    border-radius: 12px;
-    margin: 0 auto 20px;
-    width: 100%; max-width: 320px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
     box-shadow: var(--shadow-lg);
+    min-height: 500px;
+    
+    /* Background Image - PNG */
+    background-image: url('../images/foodconnect-logo.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
 }
-.auth-side h2 { font-size: 22px; margin-bottom: 20px; line-height: 1.3; }
-.auth-side-features {
-    display: flex; justify-content: center; gap: 18px; flex-wrap: wrap;
-    font-size: 13px; font-weight: 500;
+
+/* Dark Green Gradient Overlay */
+.auth-side::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(135deg, rgba(27, 94, 32, 0.85) 0%, rgba(46, 125, 50, 0.75) 100%);
+    z-index: 1;
 }
-.auth-side-features > div {
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
+
+/* Content inside the right panel */
+.auth-side-content {
+    position: relative;
+    z-index: 2;
+    padding: 40px;
+    color: #fff;
+    width: 100%;
 }
-.auth-side-features span { font-size: 22px; }
+
+.auth-side-tagline {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.9);
+}
+
+.auth-side-content h2 {
+    font-size: 34px;
+    font-weight: 800;
+    line-height: 1.2;
+    margin-bottom: 30px;
+    text-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* Floating Icons Container */
+.auth-side-icons {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    margin-top: 40px;
+}
+
+.floating-icon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    font-size: 32px;
+    animation: floatUpDown 3s ease-in-out infinite;
+}
+
+.floating-icon:nth-child(1) { animation-delay: 0s; }
+.floating-icon:nth-child(2) { animation-delay: 0.5s; }
+.floating-icon:nth-child(3) { animation-delay: 1s; }
+.floating-icon:nth-child(4) { animation-delay: 1.5s; }
+
+.floating-icon span {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+@keyframes floatUpDown {
+    0% { transform: translateY(0px); }
+    50% { transform: translateY(-12px); }
+    100% { transform: translateY(0px); }
+}
+
+/* Fade in animation for the whole panel */
+@keyframes premiumFadeIn {
+    0% { opacity: 0; transform: translateX(20px); }
+    100% { opacity: 1; transform: translateX(0); }
+}
+.auth-side {
+    animation: premiumFadeIn 1s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
 
 /* Role picker */
 .role-picker {
@@ -83,32 +161,4 @@
     .auth-container, .auth-container.auth-login { grid-template-columns: 1fr; }
     .auth-form-wrap { padding: 26px 22px; }
     .auth-side { display: none; }
-}
-/* ---- Password show/hide toggle ---- */
-.password-wrap {
-    position: relative;
-    display: block;
-}
-.password-wrap .form-control {
-    padding-right: 42px;
-}
-.password-toggle {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 17px;
-    line-height: 1;
-    color: #6B7280;
-    padding: 4px;
-    opacity: .75;
-    transition: opacity .15s;
-    user-select: none;
-}
-.password-toggle:hover {
-    opacity: 1;
-    color: #1B5E20;
 }
