@@ -139,44 +139,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Full Name *</label>
-                        <input type="text" name="name" class="form-control" required
-                               value="<?= sanitize($old['name']) ?>">
+                        <input type="text" name="name" class="form-control" required value="<?= sanitize($old['name']) ?>">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Phone</label>
-                        <input type="tel" name="phone" class="form-control"
-                               value="<?= sanitize($old['phone']) ?>">
+                        <input type="tel" name="phone" class="form-control" value="<?= sanitize($old['phone']) ?>">
                     </div>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Email Address *</label>
-                    <input type="email" name="email" class="form-control" required
-                           value="<?= sanitize($old['email']) ?>">
+                    <input type="email" name="email" class="form-control" required value="<?= sanitize($old['email']) ?>">
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Password *</label>
                         <div class="password-wrap">
-                            <input type="password" name="password" id="password" class="form-control"
-                                   minlength="6" required>
-                            <button type="button" class="password-toggle" onclick="togglePassword(this)" aria-label="Show password">👁</button>
+                            <input type="password" name="password" id="password" class="form-control" minlength="6" required>
+                            <button type="button" class="password-toggle" onclick="togglePassword(this)">👁</button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Confirm Password *</label>
                         <div class="password-wrap">
-                            <input type="password" name="confirm_password" id="confirm_password"
-                                   class="form-control" minlength="6" required>
-                            <button type="button" class="password-toggle" onclick="togglePassword(this)" aria-label="Show password">👁</button>
+                            <input type="password" name="confirm_password" id="confirm_password" class="form-control" minlength="6" required>
+                            <button type="button" class="password-toggle" onclick="togglePassword(this)">👁</button>
                         </div>
                     </div>
                 </div>
 
-                <h4 style="margin-top:20px;font-size:15px;color:var(--green-dark)">
-                    📍 Location (needed for 15 KM matching)
-                </h4>
+                <h4 style="margin-top:20px;font-size:15px;color:var(--green-dark)">📍 Location (needed for 15 KM matching)</h4>
 
                 <div class="form-group">
                     <label class="form-label">Address</label>
@@ -186,32 +179,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">City *</label>
-                        <input type="text" name="city" id="city" class="form-control" required
-                               value="<?= sanitize($old['city']) ?>" placeholder="e.g. Tumkur">
+                        <input type="text" name="city" id="city" class="form-control" required value="<?= sanitize($old['city']) ?>" placeholder="e.g. Tumkur">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Area</label>
-                        <input type="text" name="area" id="area" class="form-control"
-                               value="<?= sanitize($old['area']) ?>" placeholder="e.g. Kyathsandra">
+                        <input type="text" name="area" id="area" class="form-control" value="<?= sanitize($old['area']) ?>" placeholder="e.g. Kyathsandra">
                     </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Pincode *</label>
-                        <input type="text" name="pincode" id="pincode" class="form-control" required
-                               value="<?= sanitize($old['pincode']) ?>" maxlength="10">
+                        <input type="text" name="pincode" id="pincode" class="form-control" required value="<?= sanitize($old['pincode']) ?>" maxlength="10">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Profile Photo (optional)</label>
-                        <input type="file" name="profile_photo" class="form-control"
-                               accept="image/jpeg,image/png,image/webp"
-                               onchange="previewImage(this, document.getElementById('preview-photo'))">
+                        <input type="file" name="profile_photo" class="form-control" accept="image/jpeg,image/png,image/webp">
                     </div>
-                </div>
-
-                <div class="form-group">
-                    <img id="preview-photo" style="display:none;max-width:120px;border-radius:10px;margin-top:8px">
                 </div>
 
                 <?php render_location_picker($old); ?>
@@ -224,13 +208,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
         </div>
 
+        <!-- Right: Premium Animated Image -->
         <div class="auth-side">
-            <img src="<?= BASE_URL ?>assets/images/about-food.jpg" alt="Together we reduce food waste">
-            <h2>Together we can reduce food waste.</h2>
-            <div class="auth-side-features">
-                <div><span>🍱</span> Donate Food</div>
-                <div><span>🤝</span> Help People</div>
-                <div><span>🌱</span> Build Community</div>
+            <div class="auth-side-content">
+                <p class="auth-side-tagline">Together we reduce food waste</p>
+                <h2>Together we can <br>reduce food waste.</h2>
+                
+                <div class="auth-side-icons">
+                    <div class="floating-icon">🍱<span>Donate</span></div>
+                    <div class="floating-icon">🤝<span>Help</span></div>
+                    <div class="floating-icon">🌱<span>Grow</span></div>
+                </div>
             </div>
         </div>
     </div>
