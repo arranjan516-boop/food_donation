@@ -13,7 +13,6 @@ if (!$donationId) {
     redirect(BASE_URL . 'index.php');
 }
 
-// 1. Fetch Donation, NGO, and Recipient Info
 $stmt = $pdo->prepare("
     SELECT d.*, 
            fr.request_id AS accepted_request_id,
@@ -26,10 +25,7 @@ $stmt = $pdo->prepare("
 $stmt->execute([':id' => $donationId]);
 $d = $stmt->fetch();
 
-if (!$d) { 
-    set_flash('error', 'Donation not found.'); 
-    redirect(BASE_URL . 'index.php'); 
-}
+if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'index.php'); }
 
 $isDonor = ((int)$d['donor_id'] === $uid);
 $isNgo = ((int)$d['ngo_id'] === $uid);
@@ -41,15 +37,13 @@ if (!$isDonor && !$isNgo && !$isRecipient && !$isAdmin) {
     redirect(BASE_URL . 'index.php');
 }
 
-// Determine partner based on who is logged in
 $partnerId = 0;
 if ($isRecipient) {
-    $partnerId = (int)$d['ngo_id']; // Recipient chats with NGO
+    $partnerId = (int)$d['ngo_id'];
 } elseif ($isNgo) {
-    // If a recipient is assigned, NGO chats with Recipient. Otherwise, NGO chats with Donor.
     $partnerId = $d['recipient_id'] ? (int)$d['recipient_id'] : (int)$d['donor_id'];
 } elseif ($isDonor) {
-    $partnerId = (int)$d['ngo_id']; // Donor chats with NGO
+    $partnerId = (int)$d['ngo_id'];
 } elseif ($isAdmin) {
     $partnerId = $d['ngo_id'] ? (int)$d['ngo_id'] : (int)$d['donor_id'];
 }
@@ -61,7 +55,6 @@ if (!$partnerId) {
 
 $errors = [];
 
-// 2. Handle POST (Send Message)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $msg = post('message');
@@ -83,7 +76,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// 3. Fetch Messages
 $msgs = $pdo->prepare("
     SELECT m.*, u.name AS sender_name, u.role AS sender_role
     FROM messages m
@@ -97,12 +89,11 @@ $messages = $msgs->fetchAll();
 
 $pdo->prepare("UPDATE messages SET is_read = 1 WHERE donation_id = :d AND receiver_id = :u")->execute([':d' => $donationId, ':u' => $uid]);
 
-// 4. Fetch Chat Partner Info
-$pstmt = $pdo->prepare("SELECT name, role FROM users WHERE user_id = :u");
+// Fetch partner with is_verified column for the badge
+$pstmt = $pdo->prepare("SELECT name, role, is_verified FROM users WHERE user_id = :u");
 $pstmt->execute([':u' => $partnerId]);
 $partner = $pstmt->fetch();
 
-// 5. Back URL logic
 $backUrl = BASE_URL . 'index.php';
 if ($isDonor) { $backUrl = BASE_URL . 'donor/donation-details.php?id=' . $donationId; }
 elseif ($isRecipient) { $backUrl = BASE_URL . 'recipient/request-details.php?id=' . ($d['accepted_request_id'] ?? 0); }
@@ -116,7 +107,11 @@ require_once __DIR__ . '/includes/dashboard-header.php';
     <div class="chat-header">
         <div>
             <h2>💬 <?= sanitize($d['food_name']) ?></h2>
-            <p class="text-muted">Chat with <strong><?= sanitize($partner['name']) ?></strong> (<?= sanitize($partner['role']) ?>)</p>
+            <p class="text-muted">
+                Chat with <strong><?= sanitize($partner['name']) ?></strong> 
+                <?= verified_badge($partner['is_verified'] ?? 0, $partner['role']) ?> 
+                (<?= sanitize($partner['role']) ?>)
+            </p>
         </div>
         <a href="<?= $backUrl ?>" class="btn btn-outline btn-sm">← Back to Details</a>
     </div>
