@@ -1,7 +1,7 @@
 <?php
 // includes/dashboard-header.php
 if (ob_get_level() === 0) {
-    ob_start(); // Start output buffering to prevent headers already sent errors
+    ob_start();
 }
 
 if (session_status() === PHP_SESSION_NONE) session_start();
@@ -11,6 +11,9 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/notification-functions.php';
 
 require_login();
+
+// NEW: Trigger the 2-hour inventory expiry check on every page load
+auto_expire_ngo_inventory($pdo);
 
 $__role      = current_role();
 $__user      = current_user();
@@ -56,8 +59,9 @@ $__menus = [
         ['Dashboard',           'ngo/dashboard.php',            '🏠'],
         ['Available Donations', 'ngo/available-donations.php',  '🍱'],
         ['My Donations',        'ngo/my-donations.php',         '📦'],
+        ['Recipient Requests',  'ngo/requests.php',             '📨'],
+        ['Inventory',           'ngo/received-food.php',        '📊'],
         ['Pickup Schedule',     'ngo/pickup-schedule.php',      '📅'],
-        ['Distribution',        'ngo/distribution.php',         '🍽️'],
         ['History',             'ngo/history.php',              '🕘'],
         ['Notifications',       'ngo/notifications.php',        '🔔'],
         ['Feedback',            'ngo/feedback.php',             '⭐'],
