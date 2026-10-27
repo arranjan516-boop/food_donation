@@ -35,8 +35,9 @@ $mine = $pdo->prepare("SELECT request_id, status FROM food_requests WHERE donati
 $mine->execute([':d' => $id, ':u' => $uid]);
 $myRequest = $mine->fetch();
 
-// NEW LOGIC: Is it available based on NGO Inventory?
-$isAvailable = ($d['available_qty'] > 0) && in_array($d['status'], ['picked_up', 'distributing']);
+// NEW LOGIC: Accept 'delivered' status as well, since the NGO has received it
+$validStatuses = ['picked_up', 'delivered', 'distributing'];
+$isAvailable = ($d['available_qty'] > 0) && in_array($d['status'], $validStatuses);
 
 $lockReason = '';
 if (!$isAvailable) {
