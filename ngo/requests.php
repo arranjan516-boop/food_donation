@@ -51,7 +51,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Load pending AND accepted requests to show action buttons
 $stmt = $pdo->prepare("
     SELECT fr.*, d.food_name, d.unit, u.name AS recipient_name
     FROM food_requests fr
