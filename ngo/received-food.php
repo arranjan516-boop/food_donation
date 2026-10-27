@@ -31,12 +31,17 @@ $batches = $stmt->fetchAll();
                     <th>Donor</th>
                     <th>Collected</th>
                     <th>Distributed</th>
+                    <th>Inventory Level</th>
                     <th>Remaining</th>
-                    <th>Status</th>
                 </tr>
             </thead>
             <tbody>
             <?php foreach ($batches as $b): ?>
+                <?php 
+                    $percent = $b['collected_quantity'] > 0 
+                        ? ($b['distributed_quantity'] / $b['collected_quantity']) * 100 
+                        : 0;
+                ?>
                 <tr>
                     <td class="flex gap-1" style="align-items:center">
                         <img class="thumb" src="<?= food_photo_url($b['food_photo']) ?>" alt="">
@@ -45,6 +50,12 @@ $batches = $stmt->fetchAll();
                     <td><?= sanitize($b['donor_name']) ?></td>
                     <td><?= (float)$b['collected_quantity'] ?> <?= sanitize($b['unit']) ?></td>
                     <td><?= (float)$b['distributed_quantity'] ?> <?= sanitize($b['unit']) ?></td>
+                    <td style="width:250px;">
+                        <div style="background:#E5E7EB; height:12px; border-radius:20px; overflow:hidden; margin-top:10px;">
+                            <div style="width:<?= $percent ?>%; background: var(--green); height:100%; transition: width 0.3s;"></div>
+                        </div>
+                        <small class="text-muted"><?= round($percent) ?>% distributed</small>
+                    </td>
                     <td>
                         <?php if ($b['remaining_qty'] > 0): ?>
                             <span class="badge badge-green" style="font-size:14px;"><?= (float)$b['remaining_qty'] ?> <?= sanitize($b['unit']) ?></span>
@@ -52,7 +63,6 @@ $batches = $stmt->fetchAll();
                             <span class="badge badge-red">Out of Stock</span>
                         <?php endif; ?>
                     </td>
-                    <td><?= status_badge($b['status']) ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
