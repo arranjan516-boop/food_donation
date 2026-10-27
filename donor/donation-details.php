@@ -7,7 +7,6 @@ require_once __DIR__ . '/../includes/notification-functions.php';
 $uid = current_user_id();
 $id  = int_get('id');
 
-// Load donation
 $sql = "SELECT * FROM food_donations WHERE donation_id = :id";
 if (current_role() !== 'admin') $sql .= " AND donor_id = :u";
 $stmt = $pdo->prepare($sql);
@@ -17,7 +16,6 @@ $stmt->execute($params);
 $d = $stmt->fetch();
 if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'donor/my-donations.php'); }
 
-// Fetch NGO Requests
 $nr = $pdo->prepare("
     SELECT nr.*, u.name AS ngo_name, u.phone AS ngo_phone, u.email AS ngo_email
     FROM ngo_requests nr
@@ -34,6 +32,11 @@ foreach ($ngoRequests as $n) {
     if ($n['status'] === 'pending') $pendingNgo = $n;
     if ($n['status'] === 'accepted') $acceptedNgo = $n;
 }
+
+// Fetch delivery proof
+$pf = $pdo->prepare("SELECT dp.*, u.name AS uploader_name FROM delivery_proofs dp JOIN users u ON u.user_id = dp.uploaded_by WHERE dp.donation_id = :id ORDER BY uploaded_at DESC LIMIT 1");
+$pf->execute([':id' => $id]);
+$proof = $pf->fetch();
 ?>
 
 <div class="card mb-3">
@@ -41,7 +44,6 @@ foreach ($ngoRequests as $n) {
         <h2><?= sanitize($d['food_name']) ?></h2>
         <?= status_badge($d['status']) ?>
     </div>
-
     <div class="details-grid">
         <img src="<?= food_photo_url($d['food_photo']) ?>" alt="" style="width:100%;border-radius:12px">
         <div>
@@ -56,17 +58,14 @@ foreach ($ngoRequests as $n) {
     </div>
 </div>
 
-<!-- Visual Timeline (Will show up to 'picked_up' since we removed collector steps) -->
+<!-- Visual Timeline -->
 <div class="card mb-3" style="padding: 20px;">
     <?php render_timeline($d['status']); ?>
 </div>
 
-<!-- NGO REQUEST SECTION -->
 <?php if ($d['status'] === 'available'): ?>
     <div class="table-card mb-3">
-        <div class="table-card-header">
-            <h3>NGO Requests (<?= count($ngoRequests) ?>)</h3>
-        </div>
+        <div class="table-card-header"><h3>NGO Requests (<?= count($ngoRequests) ?>)</h3></div>
         <?php if (!$ngoRequests): ?>
             <div style="padding:24px;text-align:center"><p class="text-muted">Waiting for nearby NGOs to request this food...</p></div>
         <?php else: ?>
@@ -94,7 +93,6 @@ foreach ($ngoRequests as $n) {
     </div>
 <?php endif; ?>
 
-<!-- ACCEPTED NGO INFO -->
 <?php if ($acceptedNgo): ?>
     <div class="card mb-3" style="border-left:4px solid var(--green);background:#F1F8E9">
         <h3 class="card-title" style="color:var(--green-dark)">🏢 Assigned NGO</h3>
@@ -106,15 +104,12 @@ foreach ($ngoRequests as $n) {
     </div>
 <?php endif; ?>
 
-<!-- DELIVERY PROOF (If uploaded by NGO later) -->
-<?php 
-$pf = $pdo->prepare("SELECT dp.*, u.name AS uploader_name FROM delivery_proofs dp JOIN users u ON u.user_id = dp.uploaded_by WHERE dp.donation_id = :id ORDER BY uploaded_at DESC LIMIT 1");
-$pf->execute([':id' => $id]);
-$proof = $pf->fetch();
-if ($proof): 
-?>
+<?php if ($proof): ?>
 <div class="card mb-3">
-    <h3 class="card-title">📷 Collection Proof</h3>
+    <h3 class="card-title">📷 NGO Collection Proof</h3>
+    <p><strong>Uploaded by:</strong> <?= sanitize($proof['uploader_name']) ?> (<?= sanitize($proof['uploaded_by_role']) ?>)</p>
+    <p><strong>Date:</strong> <?= date('d M Y, h:i A', strtotime($proof['uploaded_at'])) ?></p>
+    <?php if ($proof['delivery_note']): ?><p><strong>Note:</strong> <?= sanitize($proof['delivery_note']) ?></p><?php endif; ?>
     <img src="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>" style="max-width:280px;border-radius:12px;margin-top:10px" alt="">
 </div>
 <?php endif; ?>
