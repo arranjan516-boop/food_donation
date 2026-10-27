@@ -14,80 +14,45 @@ if (current_role() !== 'collector' && current_role() !== 'admin') {
 $uid = current_user_id();
 $donationId = int_get('id');
 
+// Load donation + NGO info
 $stmt = $pdo->prepare("
-    SELECT d.*, u.name AS donor_name, u.phone AS donor_phone
+    SELECT d.*, n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area, n.city AS ngo_city,
+           fr.request_id, fr.recipient_id, fr.quantity AS req_qty, r.name AS recipient_name, r.phone AS recipient_phone,
+           r.address AS recipient_address, r.area AS recipient_area, r.city AS recipient_city
     FROM food_donations d
-    JOIN users u ON u.user_id = d.donor_id
-    WHERE d.donation_id = :id
+    JOIN users n ON n.user_id = d.ngo_id
+    JOIN food_requests fr ON fr.donation_id = d.donation_id AND fr.delivery_method = 'collector'
+    JOIN users r ON r.user_id = fr.recipient_id
+    WHERE d.donation_id = :id AND d.status = 'picked_up' AND fr.status = 'accepted'
 ");
 $stmt->execute([':id' => $donationId]);
 $d = $stmt->fetch();
-if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'collector/available-tasks.php'); }
+if (!$d) { set_flash('error', 'Donation not found or not available for collector.'); redirect(BASE_URL . 'collector/available-tasks.php'); }
 
-// Already a collector assigned?
-$existing = $pdo->prepare("
-    SELECT ct.*, u.name AS collector_name
-    FROM collector_tasks ct
-    JOIN users u ON u.user_id = ct.collector_id
-    WHERE ct.donation_id = :d AND ct.status IN ('accepted','pickup_started','picked_up','delivering','completed')
-    LIMIT 1
-");
-$existing->execute([':d' => $donationId]);
-$existingTask = $existing->fetch();
-
-// My own request?
-$mine = $pdo->prepare("SELECT * FROM collector_tasks WHERE donation_id=:d AND collector_id=:u ORDER BY task_id DESC LIMIT 1");
-$mine->execute([':d' => $donationId, ':u' => $uid]);
-$myTask = $mine->fetch();
+// Check if I already accepted this
+$existing = $pdo->prepare("SELECT ct.* FROM collector_tasks ct JOIN food_requests fr ON fr.request_id = ct.request_id WHERE fr.donation_id = :d AND fr.recipient_id = :r AND ct.collector_id = :u AND ct.status IN ('accepted','pickup_started','picked_up','delivering','delivered','completed') LIMIT 1");
+$existing->execute([':d' => $donationId, ':r' => $d['recipient_id'], ':u' => $uid]);
+$myTask = $existing->fetch();
 
 $errors = [];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'accept') {
     verify_csrf();
-    $action = post('action');
-
-    if ($action === 'request_collect') {
-        if ($existingTask) {
-            $errors[] = 'This pickup has already been accepted by ' . $existingTask['collector_name'] . '.';
-        } elseif ($myTask && $myTask['status'] === 'pending') {
-            $errors[] = 'You already have a pending request for this donation.';
-        } elseif ($myTask && in_array($myTask['status'], ['rejected','cancelled'], true)) {
-            $errors[] = 'Your earlier request was not accepted.';
-        } else {
-            try {
-                $pdo->beginTransaction();
-
-                $lock = $pdo->prepare("SELECT status FROM food_donations WHERE donation_id = :d FOR UPDATE");
-                $lock->execute([':d' => $donationId]);
-                $live = $lock->fetch();
-                if (!$live || $live['status'] !== 'accepted') {
-                    throw new Exception('This donation is not ready for collectors yet.');
-                }
-
-                $reqStmt = $pdo->prepare("SELECT request_id FROM food_requests WHERE donation_id = :d AND status='accepted' ORDER BY accepted_at DESC LIMIT 1");
-                $reqStmt->execute([':d' => $donationId]);
-                $req = $reqStmt->fetch();
-                $requestId = $req ? (int)$req['request_id'] : null;
-
-                $pdo->prepare("
-                    INSERT INTO collector_tasks (request_id, donation_id, collector_id, status)
-                    VALUES (:r, :d, :c, 'pending')
-                ")->execute([':r' => $requestId, ':d' => $donationId, ':c' => $uid]);
-
-                notify($pdo, (int)$d['donor_id'], '🚴 New Collector Request',
-                    current_user()['name'] . ' wants to collect "' . $d['food_name'] . '".',
-                    'collector_request', $donationId);
-
-                $pdo->commit();
-
-                set_flash('success', 'Request sent to the donor. You will be notified when they accept.');
-                redirect(BASE_URL . 'collector/my-tasks.php');
-
-            } catch (Exception $ex) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
-                $errors[] = $ex->getMessage();
-            }
-        }
+    try {
+        $pdo->beginTransaction();
+        
+        $ins = $pdo->prepare("
+            INSERT INTO collector_tasks (request_id, donation_id, collector_id, status)
+            VALUES (:r, :d, :c, 'accepted')
+        ");
+        $ins->execute([':r' => $d['request_id'], ':d' => $d['donation_id'], ':c' => $uid]);
+        
+        $pdo->commit();
+        set_flash('success', 'Delivery task accepted! Navigate to the NGO to pick up the food.');
+        redirect(BASE_URL . 'collector/active-delivery.php?id=' . $pdo->lastInsertId());
+    } catch (Exception $ex) {
+        $pdo->rollBack();
+        $errors[] = $ex->getMessage();
     }
 }
 
@@ -100,49 +65,36 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <?php endif; ?>
 
 <div class="card mb-3">
-    <div class="flex-between mb-2">
-        <h2><?= sanitize($d['food_name']) ?></h2>
-        <?= status_badge($d['status']) ?>
-    </div>
-
+    <h3 class="card-title">📦 Delivery Task</h3>
     <div class="details-grid">
-        <img src="<?= food_photo_url($d['food_photo']) ?>" alt="">
+        <img src="<?= food_photo_url($d['food_photo']) ?>" alt="" style="width:100%;border-radius:12px">
         <div>
-            <p><strong>Donor:</strong> <?= sanitize($d['donor_name']) ?></p>
-            <p><strong>Contact:</strong> <?= sanitize($d['donor_phone'] ?: '—') ?></p>
-            <p><strong>Pickup:</strong> <?= sanitize($d['address']) ?>, <?= sanitize($d['area']) ?>, <?= sanitize($d['city']) ?> - <?= sanitize($d['pincode']) ?></p>
-            <p><strong>Quantity:</strong> <?= (float)$d['quantity'] ?> <?= sanitize($d['unit']) ?></p>
-            <p><strong>People served:</strong> <?= (int)$d['people_served'] ?></p>
-            <p><strong>Urgency:</strong> <?= ucfirst(str_replace('_',' ',$d['urgency'])) ?></p>
-            <p><strong>Best before:</strong> <?= $d['best_before'] ? date('d M Y, h:i A', strtotime($d['best_before'])) : '—' ?></p>
+            <h4>🏢 Pickup From (NGO)</h4>
+            <p><strong><?= sanitize($d['ngo_name']) ?></strong></p>
+            <p><?= sanitize($d['ngo_address']) ?>, <?= sanitize($d['ngo_area']) ?></p>
+            <p><strong>Phone:</strong> <?= sanitize($d['ngo_phone']) ?></p>
+            
+            <h4 style="margin-top:16px">🏁 Deliver To (Recipient)</h4>
+            <p><strong><?= sanitize($d['recipient_name']) ?></strong></p>
+            <p><?= sanitize($d['recipient_address']) ?>, <?= sanitize($d['recipient_area']) ?></p>
+            <p><strong>Phone:</strong> <?= sanitize($d['recipient_phone']) ?></p>
+            
+            <p style="margin-top:16px"><strong>Quantity:</strong> <?= (float)$d['req_qty'] ?> <?= sanitize($d['unit']) ?></p>
         </div>
     </div>
 </div>
 
-<?php if ($existingTask && $existingTask['collector_id'] != $uid): ?>
+<?php if ($myTask): ?>
     <div class="card">
-        <div class="toast toast-info">🔒 This pickup was assigned to <?= sanitize($existingTask['collector_name']) ?>.</div>
-        <a href="<?= BASE_URL ?>collector/available-tasks.php" class="btn btn-outline">← Back</a>
-    </div>
-<?php elseif ($existingTask && $existingTask['collector_id'] == $uid): ?>
-    <div class="card">
-        <div class="toast toast-success">✅ You have been assigned this pickup.</div>
-        <a href="<?= BASE_URL ?>collector/active-delivery.php?id=<?= (int)$existingTask['task_id'] ?>" class="btn btn-primary">Continue to Active Delivery</a>
-    </div>
-<?php elseif ($myTask && $myTask['status'] === 'pending'): ?>
-    <div class="card">
-        <div class="toast toast-info">⏳ Your request is pending. Waiting for the donor to accept.</div>
-        <a href="<?= BASE_URL ?>collector/my-tasks.php" class="btn btn-outline">← My Tasks</a>
+        <div class="toast toast-success">✅ You have accepted this delivery.</div>
+        <a href="<?= BASE_URL ?>collector/active-delivery.php?id=<?= (int)$myTask['task_id'] ?>" class="btn btn-primary">Continue to Active Delivery</a>
     </div>
 <?php else: ?>
     <div class="card">
-        <h3 class="card-title">Request to Collect</h3>
-        <p class="text-muted">Send a request to the donor. They will choose one collector or NGO.</p>
         <form method="post">
             <?= csrf_field() ?>
-            <input type="hidden" name="action" value="request_collect">
-            <button class="btn btn-primary btn-lg" data-confirm="Send a request to collect this donation?">🚴 Request to Collect</button>
-            <a href="<?= BASE_URL ?>collector/available-tasks.php" class="btn btn-outline">Cancel</a>
+            <input type="hidden" name="action" value="accept">
+            <button class="btn btn-primary btn-lg" data-confirm="Accept this delivery task?">🚴 Accept Delivery Task</button>
         </form>
     </div>
 <?php endif; ?>
