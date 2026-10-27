@@ -11,19 +11,18 @@ if (current_role() !== 'ngo' && current_role() !== 'admin') {
 }
 
 $uid = current_user_id();
-$errors = [];
 
-// Handle Approve/Reject
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post('action');
     $reqId = int_post('request_id');
 
     if ($action === 'approve') {
+        $deliveryMethod = post('delivery_method');
+        
         try {
             $pdo->beginTransaction();
             
-            // Get request details
             $stmt = $pdo->prepare("
                 SELECT fr.*, d.donation_id, d.ngo_id, d.unit, 
                        (d.collected_quantity - d.distributed_quantity) AS live_qty
@@ -35,19 +34,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $req = $stmt->fetch();
 
             if (!$req) throw new Exception('Request not found.');
-            if ($req['quantity'] > $req['live_qty']) throw new Exception('Not enough inventory to fulfill this request.');
+            if ($req['quantity'] > $req['live_qty']) throw new Exception('Not enough inventory.');
 
-            // 1. Approve request
-            $pdo->prepare("UPDATE food_requests SET status='accepted', accepted_at=NOW() WHERE request_id=:r")->execute([':r' => $reqId]);
+            $pdo->prepare("UPDATE food_requests SET status='accepted', accepted_at=NOW(), delivery_method=:m WHERE request_id=:r")
+                ->execute([':m' => $deliveryMethod, ':r' => $reqId]);
             
-            // 2. Deduct from Inventory (distributed_quantity)
             $pdo->prepare("UPDATE food_donations SET distributed_quantity = distributed_quantity + :q WHERE donation_id=:d")
                 ->execute([':q' => $req['quantity'], ':d' => $req['donation_id']]);
 
             $pdo->commit();
 
-            notify($pdo, (int)$req['recipient_id'], '✅ Request Approved', 'Your food request has been approved by the NGO.', 'request_accepted', $req['donation_id']);
-            set_flash('success', 'Request approved and inventory updated.');
+            notify($pdo, (int)$req['recipient_id'], '✅ Request Approved', 'Your food request has been approved. Delivery method: ' . strtoupper($deliveryMethod), 'request_accepted', $req['donation_id']);
+            set_flash('success', 'Request approved! Delivery method set to: ' . strtoupper($deliveryMethod));
 
         } catch (Exception $ex) {
             $pdo->rollBack();
@@ -63,7 +61,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Load pending requests for this NGO's donations
 $stmt = $pdo->prepare("
     SELECT fr.*, d.food_name, d.unit, u.name AS recipient_name
     FROM food_requests fr
@@ -93,12 +90,19 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
                     <td><?= sanitize($r['food_name']) ?></td>
                     <td><?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></td>
                     <td>
-                        <form method="post" style="display:inline">
+                        <form method="post" style="display:flex; gap:8px; align-items:center;">
                             <?= csrf_field() ?>
                             <input type="hidden" name="request_id" value="<?= (int)$r['request_id'] ?>">
                             <input type="hidden" name="action" value="approve">
-                            <button class="btn btn-primary btn-sm" data-confirm="Approve this request? This will deduct from your inventory.">✅ Approve</button>
+                            
+                            <select name="delivery_method" class="form-control" style="width:auto;">
+                                <option value="ngo">🏢 NGO will Deliver</option>
+                                <option value="collector">🚴 Assign a Collector</option>
+                            </select>
+                            
+                            <button class="btn btn-primary btn-sm" data-confirm="Approve this request?">✅ Approve</button>
                         </form>
+                        
                         <form method="post" style="display:inline;margin-left:6px">
                             <?= csrf_field() ?>
                             <input type="hidden" name="request_id" value="<?= (int)$r['request_id'] ?>">
