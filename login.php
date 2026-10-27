@@ -3,6 +3,7 @@
 $pageTitle = 'Login';
 require_once __DIR__ . '/includes/header.php';
 
+// If already logged in → redirect
 if (is_logged_in()) {
     redirect(dashboard_url_for_role(current_role()));
 }
@@ -32,9 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (!password_verify($password, $user['password'])) {
             $error = 'Incorrect password.';
         } else {
-            $pdo->prepare("UPDATE users SET last_login = NOW() WHERE user_id = :u")
-                ->execute([':u' => $user['user_id']]);
-
+            // Login successful (Removed last_login update to prevent error)
             login_user($user);
             set_flash('success', 'Welcome back, ' . $user['name'] . '!');
             redirect(dashboard_url_for_role($user['role']));
