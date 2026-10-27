@@ -27,7 +27,6 @@ $t = $stmt->fetch();
 if (!$t) { set_flash('error', 'Delivery task not found or not assigned to NGO delivery.'); redirect(BASE_URL . 'ngo/dashboard.php'); }
 
 // Map URLs
-$ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode(($t['ngo_lat'] && $t['ngo_lng']) ? $t['ngo_lat'].','.$t['ngo_lng'] : $t['ngo_area'].' '.$t['ngo_city']) . '&travelmode=driving';
 $recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode(($t['r_lat'] && $t['r_lng']) ? $t['r_lat'].','.$t['r_lng'] : $t['recipient_area'].' '.$t['recipient_city']) . '&travelmode=driving';
 
 $errors = [];
@@ -43,18 +42,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'complete') {
     } else {
         $pdo->beginTransaction();
         try {
+            // 1. Create the delivery record
             $pdo->prepare("INSERT INTO deliveries (donation_id, request_id, method, ngo_id, status, delivered_at) VALUES (:d, :r, 'ngo', :u, 'delivered', NOW())")
                 ->execute([':d' => $t['donation_id'], ':r' => $reqId, ':u' => $uid]);
             $deliveryId = (int)$pdo->lastInsertId();
 
+            // 2. Upload the proof
             $pdo->prepare("INSERT INTO delivery_proofs (donation_id, request_id, delivery_id, uploaded_by, uploaded_by_role, proof_image, delivery_note) VALUES (:d, :r, :del, :u, 'ngo', :img, :note)")
                 ->execute([':d' => $t['donation_id'], ':r' => $reqId, ':del' => $deliveryId, ':u' => $uid, ':img' => $proof, ':note' => post('note')]);
 
-            $pdo->prepare("UPDATE food_requests SET status='completed' WHERE request_id=:r")->execute([':r' => $reqId]);
+            // 3. Update the request status to 'completed' (Recipient still needs to confirm)
+            // Note: We keep the donation status as 'delivered' so the tracker on the donor side doesn't jump ahead. 
+            // The recipient's confirmation will update the donation status to 'completed'.
             
             $pdo->commit();
-            notify($pdo, (int)$t['recipient_id'], '🍱 Food Delivered', 'Your food has been delivered by the NGO.', 'delivered', $t['donation_id']);
-            set_flash('success', 'Delivery completed successfully!');
+            notify($pdo, (int)$t['recipient_id'], '🍱 Food Delivered', 'Your food has been delivered by the NGO. Please confirm receipt.', 'delivered', $t['donation_id']);
+            
+            set_flash('success', 'Delivery proof uploaded! Waiting for recipient to confirm.');
             redirect(BASE_URL . 'ngo/requests.php');
         } catch (Exception $ex) {
             $pdo->rollBack();
@@ -77,6 +81,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <div class="card mb-3" style="border-left:4px solid var(--green); background:#F1F8E9">
     <h4>🏁 Deliver To (Recipient)</h4>
     <p><?= sanitize($t['recipient_address']) ?>, <?= sanitize($t['recipient_area']) ?>, <?= sanitize($t['recipient_city']) ?></p>
+    <p><strong>Phone:</strong> <?= sanitize($t['recipient_phone']) ?></p>
     <a href="<?= $recipientMapUrl ?>" target="_blank" class="btn btn-outline btn-sm mt-2">🧭 Navigate to Recipient</a>
 </div>
 
@@ -86,6 +91,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <?= csrf_field() ?>
         <input type="hidden" name="action" value="complete">
         <div class="form-group">
+            <label class="form-label">Delivery Proof Photo *</label>
             <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
         </div>
         <div class="form-group">
