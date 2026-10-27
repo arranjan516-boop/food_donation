@@ -58,8 +58,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lock = $pdo->prepare("SELECT status FROM food_donations WHERE donation_id = :d FOR UPDATE");
                 $lock->execute([':d' => $donationId]);
                 $live = $lock->fetch();
-                if (!$live || $live['status'] !== 'accepted') {
-                    throw new Exception('This donation is not ready for NGO handling yet.');
+                
+                // THE FIX: Allow requesting if the status is 'available' or 'ngo_assigned'
+                if (!$live || !in_array($live['status'], ['available', 'ngo_assigned'])) {
+                    throw new Exception('This donation is not available for NGO handling.');
                 }
 
                 $pdo->prepare("INSERT INTO ngo_requests (donation_id, ngo_id, status) VALUES (:d, :n, 'pending')")
