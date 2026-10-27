@@ -13,13 +13,14 @@ $me = $me->fetch();
 $myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['latitude']  : null;
 $myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
-// Fetch only food that has been collected by an NGO and has remaining inventory
+// Fetch food that has been collected by an NGO and has remaining inventory
+// We accept both 'picked_up' and 'delivered' statuses
 $sql = "
     SELECT d.*, u.name AS ngo_name, u.city AS ngo_city, u.area AS ngo_area, u.latitude AS ngo_lat, u.longitude AS ngo_lng,
            (d.collected_quantity - d.distributed_quantity) AS available_qty
     FROM food_donations d
     JOIN users u ON u.user_id = d.ngo_id
-    WHERE d.status IN ('picked_up', 'distributing')
+    WHERE d.status IN ('picked_up', 'delivered', 'distributing')
       AND (d.collected_quantity - d.distributed_quantity) > 0
       AND u.is_verified = 1
     ORDER BY d.created_at DESC
@@ -30,15 +31,25 @@ $all = $pdo->query($sql)->fetchAll();
 $donations = [];
 if ($myLat !== null && $myLng !== null) {
     foreach ($all as $d) {
-        if ($d['ngo_lat'] === null || $d['ngo_lng'] === null) continue;
-
-        $km = haversine_km($myLat, $myLng, (float)$d['ngo_lat'], (float)$d['ngo_lng']);
-        if ($km === null || $km > MATCH_RADIUS_KM) continue;
-
-        $d['distance_km'] = round($km, 2);
-        $donations[] = $d;
+        // If NGO doesn't have coordinates, skip distance check but still show it (fallback)
+        if ($d['ngo_lat'] !== null && $d['ngo_lng'] !== null) {
+            $km = haversine_km($myLat, $myLng, (float)$d['ngo_lat'], (float)$d['ngo_lng']);
+            if ($km !== null && $km <= MATCH_RADIUS_KM) {
+                $d['distance_km'] = round($km, 2);
+                $donations[] = $d;
+            }
+        } else {
+            // If NGO has no GPS, allow it to be seen (for testing)
+            $d['distance_km'] = null;
+            $donations[] = $d;
+        }
     }
-    usort($donations, fn($a, $b) => $a['distance_km'] <=> $b['distance_km']);
+    // Sort by distance
+    usort($donations, function($a, $b) {
+        if ($a['distance_km'] === null) return 1;
+        if ($b['distance_km'] === null) return -1;
+        return $a['distance_km'] <=> $b['distance_km'];
+    });
 }
 ?>
 
@@ -50,7 +61,7 @@ if ($myLat !== null && $myLng !== null) {
     <div class="empty-state">
         <div class="empty-icon">🍽️</div>
         <h3>No food available nearby</h3>
-        <p>NGOs near you have not collected any food yet. Check back soon.</p>
+        <p>NGOs near you have not collected any food yet, or they are outside your 15 KM radius.</p>
     </div>
 <?php else: ?>
     <div class="food-grid">
@@ -75,7 +86,11 @@ if ($myLat !== null && $myLng !== null) {
                     </div>
                     <div class="food-card-meta">
                         <span>📦 <?= (float)$d['available_qty'] ?> <?= sanitize($d['unit']) ?> available</span>
-                        <span>📍 <?= number_format($d['distance_km'], 1) ?> KM</span>
+                        <?php if ($d['distance_km'] !== null): ?>
+                            <span>📍 <?= number_format($d['distance_km'], 1) ?> KM</span>
+                        <?php else: ?>
+                            <span>📍 Location unknown</span>
+                        <?php endif; ?>
                     </div>
                     <div class="food-card-actions">
                         <a href="<?= BASE_URL ?>recipient/food-details.php?id=<?= (int)$d['donation_id'] ?>" class="btn btn-primary btn-sm">View & Request</a>
