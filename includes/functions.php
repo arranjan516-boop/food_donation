@@ -138,7 +138,7 @@ function auto_expire_ngo_inventory($pdo) {
             FROM food_donations 
             WHERE collected_at IS NOT NULL 
               AND collected_at < DATE_SUB(NOW(), INTERVAL 2 HOUR)
-              AND status IN ('picked_up', 'distributing')
+              AND status IN ('picked_up', 'distributing', 'delivered')
         ");
         $expired = $stmt->fetchAll();
         foreach ($expired as $row) {
@@ -148,4 +148,12 @@ function auto_expire_ngo_inventory($pdo) {
             }
         }
     } catch (Exception $e) { /* silent */ }
+}
+
+/* =====================  VERIFIED BADGE  ===================== */
+function verified_badge($isVerified, $role) {
+    if ($role === 'ngo' && $isVerified) {
+        return '<span title="Verified NGO" style="display:inline-flex; align-items:center; justify-content:center; background:#2E7D32; color:#fff; width:18px; height:18px; border-radius:50%; font-size:11px; margin-left:6px; vertical-align:middle;">✔</span>';
+    }
+    return '';
 }
