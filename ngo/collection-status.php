@@ -39,25 +39,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $pdo->beginTransaction();
             try {
-                // 1. Complete the NGO request
                 $pdo->prepare("UPDATE ngo_requests SET status='completed' WHERE ngo_request_id=:n")->execute([':n' => $nrId]);
                 
-                // 2. Update donation status, save quantity, AND start the 2-hour timer
-                $pdo->prepare("UPDATE food_donations SET status='picked_up', collected_quantity=:q, ngo_id=:u, collected_at=NOW() WHERE donation_id=:d")
+                // Updated: Set status to 'delivered' (Delivered to NGO), save quantity, start timer
+                $pdo->prepare("UPDATE food_donations SET status='delivered', collected_quantity=:q, ngo_id=:u, collected_at=NOW() WHERE donation_id=:d")
                     ->execute([':q' => $collectedQty, ':u' => $uid, ':d' => $r['donation_id']]);
 
-                $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, 'ngo_assigned', 'picked_up', :u)")
+                $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, 'ngo_assigned', 'delivered', :u)")
                     ->execute([':d' => $r['donation_id'], ':u' => $uid]);
 
                 $pdo->commit();
 
-                notify($pdo, (int)$r['donor_id'], '🍱 Food Collected', 'Your donation has been collected by ' . current_user()['name'] . '.', 'ngo', $r['donation_id']);
-                set_flash('success', 'Food collected! Quantity added to your inventory. You have 2 hours to distribute it.');
+                notify($pdo, (int)$r['donor_id'], '🍱 Food Delivered to NGO', 'Your donation has reached the NGO center.', 'ngo', $r['donation_id']);
+                set_flash('success', 'Food received at NGO. Quantity added to inventory.');
                 redirect(BASE_URL . 'ngo/my-donations.php');
             } catch (Exception $ex) {
                 $pdo->rollBack();
                 $errors[] = 'Error: ' . $ex->getMessage();
             }
+        }
+    }
+
+    if ($action === 'upload_proof') {
+        $proof = null;
+        if (!empty($_FILES['proof_image']['name'])) {
+            $proof = upload_image($_FILES['proof_image'], PROOF_UPLOAD, PROOF_UPLOAD_URL);
+        }
+        if (!$proof) {
+            $errors[] = 'Please upload a valid photo.';
+        } else {
+            $pdo->prepare("INSERT INTO delivery_proofs (donation_id, request_id, uploaded_by, uploaded_by_role, proof_image, delivery_note) VALUES (:d, :r, :u, 'ngo', :img, :note)")
+                ->execute([':d' => $r['donation_id'], ':r' => $r['request_id'], ':u' => $uid, ':img' => $proof, ':note' => post('delivery_note')]);
+            
+            set_flash('success', 'Collection proof uploaded successfully.');
+            redirect(BASE_URL . 'ngo/collection-status.php?id=' . $nrId);
         }
     }
 }
@@ -85,9 +100,14 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 </div>
 
+<!-- Visual Timeline -->
+<div class="card mb-3" style="padding: 20px;">
+    <?php render_timeline($r['donation_status']); ?>
+</div>
+
 <div class="card mb-3" style="border-left:4px solid var(--blue); background:#F0F9FF;">
     <h3 class="card-title" style="color:var(--blue);">🚚 Collection & Inventory</h3>
-    <p class="text-muted mb-2">The donor posted <strong><?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></strong>. Enter the actual quantity you collected. <br><em>(Note: The 2-hour distribution timer starts as soon as you submit this).</em></p>
+    <p class="text-muted mb-2">The donor posted <strong><?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></strong>. Enter the actual quantity you collected to add it to your inventory.</p>
     
     <form method="post">
         <?= csrf_field() ?>
@@ -100,9 +120,33 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
             </div>
         </div>
         
-        <button class="btn btn-primary btn-lg">✅ Mark as Collected & Start Timer</button>
+        <button class="btn btn-primary btn-lg">✅ Mark as Collected & Received at NGO</button>
     </form>
 </div>
+
+<?php if ($r['donation_status'] === 'delivered'): ?>
+<div class="card mt-3">
+    <h3 class="card-title">📷 Upload Collection Proof (Optional)</h3>
+    <p class="text-muted mb-2">Upload a photo of the food at your NGO center to share with the donor.</p>
+
+    <form method="post" enctype="multipart/form-data">
+        <?= csrf_field() ?>
+        <input type="hidden" name="action" value="upload_proof">
+        
+        <div class="form-group">
+            <label class="form-label">Proof Photo *</label>
+            <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Note (optional)</label>
+            <textarea name="delivery_note" class="form-control" rows="2" placeholder="e.g. Food arrived safely at NGO center."></textarea>
+        </div>
+
+        <button class="btn btn-primary">Upload Proof</button>
+    </form>
+</div>
+<?php endif; ?>
 
 <style>
 .details-grid { display:grid; grid-template-columns: 260px 1fr; gap:20px; }
