@@ -42,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
+            // Lock row to check inventory again safely
             $lock = $pdo->prepare("SELECT (collected_quantity - distributed_quantity) AS live_qty FROM food_donations WHERE donation_id = :d FOR UPDATE");
             $lock->execute([':d' => $donationId]);
             $live = $lock->fetch();
@@ -50,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Quantity exceeds remaining available inventory.');
             }
 
+            // Insert Request
             $ins = $pdo->prepare("
                 INSERT INTO food_requests
                   (donation_id, recipient_id, quantity, message, delivery_preference, contact_number, delivery_address, status)
@@ -62,14 +64,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             $requestId = (int)$pdo->lastInsertId();
 
-            // Note: We do NOT deduct from distributed_quantity yet. 
-            // That happens only when the NGO approves the request.
-
-            $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, :old, :new, :u)")
-                ->execute([':d' => $donationId, ':old' => $d['status'], ':new' => $d['status'], ':u' => $uid]);
-
             $pdo->commit();
 
+            // Notify NGO
             notify($pdo, (int)$d['ngo_id'], '📨 New Food Request',
                 current_user()['name'] . ' requested ' . $qty . ' ' . $d['unit'] . ' of "' . $d['food_name'] . '".',
                 'new_request', $donationId);
@@ -108,35 +105,35 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 </div>
 
-<form method="post" class="card mt-3" style="max-width:780px" data-validate>
+<form method="post" class="card mt-3" style="max-width:780px">
     <?= csrf_field() ?>
 
     <h3 class="card-title">Request Details</h3>
 
     <div class="form-group">
         <label class="form-label">Required Quantity (<?= sanitize($d['unit']) ?>) *</label>
-        <input type="number" step="0.1" min="0.1" max="<?= (float)$d['available_qty'] ?>" name="quantity" class="form-control" required>
-        <small class="text-muted">Max <?= (float)$d['available_qty'] ?> <?= sanitize($d['unit']) ?></small>
+        <input type="number" step="any" min="0.1" max="<?= (float)$d['available_qty'] ?>" name="quantity" class="form-control" required value="<?= isset($_POST['quantity']) ? sanitize($_POST['quantity']) : '' ?>">
+        <small class="text-muted">Max available: <?= (float)$d['available_qty'] ?> <?= sanitize($d['unit']) ?></small>
     </div>
 
     <div class="form-row">
         <div class="form-group">
             <label class="form-label">Contact Number *</label>
-            <input type="text" name="contact_number" class="form-control" required>
+            <input type="text" name="contact_number" class="form-control" required value="<?= isset($_POST['contact_number']) ? sanitize($_POST['contact_number']) : '' ?>">
         </div>
         <div class="form-group">
             <label class="form-label">Delivery Address</label>
-            <input type="text" name="delivery_address" class="form-control">
+            <input type="text" name="delivery_address" class="form-control" value="<?= isset($_POST['delivery_address']) ? sanitize($_POST['delivery_address']) : '' ?>">
         </div>
     </div>
 
     <div class="form-group">
         <label class="form-label">Additional Message</label>
-        <textarea name="message" class="form-control" rows="3"></textarea>
+        <textarea name="message" class="form-control" rows="3"><?= isset($_POST['message']) ? sanitize($_POST['message']) : '' ?></textarea>
     </div>
 
-    <button class="btn btn-primary btn-lg">🍱 Request Food</button>
-    <a href="<?= BASE_URL ?>recipient/available-food.php" class="btn btn-outline">Cancel</a>
+    <button class="btn btn-primary btn-lg">🍱 Submit Request</button>
+    <a href="<?= BASE_URL ?>recipient/food-details.php?id=<?= (int)$d['donation_id'] ?>" class="btn btn-outline">Cancel</a>
 </form>
 
 <style>
