@@ -41,7 +41,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $pdo->prepare("UPDATE ngo_requests SET status='completed' WHERE ngo_request_id=:n")->execute([':n' => $nrId]);
                 
-                // Updated: Set status to 'delivered' (Delivered to NGO), save quantity, start timer
                 $pdo->prepare("UPDATE food_donations SET status='delivered', collected_quantity=:q, ngo_id=:u, collected_at=NOW() WHERE donation_id=:d")
                     ->execute([':q' => $collectedQty, ':u' => $uid, ':d' => $r['donation_id']]);
 
@@ -68,11 +67,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$proof) {
             $errors[] = 'Please upload a valid photo.';
         } else {
-            $pdo->prepare("INSERT INTO delivery_proofs (donation_id, request_id, uploaded_by, uploaded_by_role, proof_image, delivery_note) VALUES (:d, :r, :u, 'ngo', :img, :note)")
-                ->execute([':d' => $r['donation_id'], ':r' => $r['request_id'], ':u' => $uid, ':img' => $proof, ':note' => post('delivery_note')]);
-            
-            set_flash('success', 'Collection proof uploaded successfully.');
-            redirect(BASE_URL . 'ngo/collection-status.php?id=' . $nrId);
+            $pdo->beginTransaction();
+            try {
+                // 1. Create a deliveries record FIRST to satisfy the Foreign Key
+                $pdo->prepare("
+                    INSERT INTO deliveries (donation_id, request_id, method, ngo_id, status, delivered_at, notes)
+                    VALUES (:d, NULL, 'ngo', :n, 'delivered', NOW(), :note)
+                ")->execute([
+                    ':d' => $r['donation_id'], 
+                    ':n' => $uid, 
+                    ':note' => post('delivery_note')
+                ]);
+                $deliveryId = (int)$pdo->lastInsertId();
+
+                // 2. Insert the proof with the valid delivery_id
+                $pdo->prepare("
+                    INSERT INTO delivery_proofs (donation_id, request_id, delivery_id, uploaded_by, uploaded_by_role, proof_image, delivery_note) 
+                    VALUES (:d, NULL, :del, :u, 'ngo', :img, :note)
+                ")->execute([
+                    ':d' => $r['donation_id'], 
+                    ':del' => $deliveryId, 
+                    ':u' => $uid, 
+                    ':img' => $proof, 
+                    ':note' => post('delivery_note')
+                ]);
+                
+                $pdo->commit();
+
+                notify($pdo, (int)$r['donor_id'], '📷 NGO Proof Uploaded', 'The NGO uploaded a photo of the food at their center.', 'proof', $r['donation_id']);
+
+                set_flash('success', 'Collection proof uploaded successfully.');
+                redirect(BASE_URL . 'ngo/collection-status.php?id=' . $nrId);
+            } catch (Exception $ex) {
+                $pdo->rollBack();
+                $errors[] = 'Upload failed: ' . $ex->getMessage();
+            }
         }
     }
 }
@@ -100,52 +129,53 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 </div>
 
-<!-- Visual Timeline -->
 <div class="card mb-3" style="padding: 20px;">
     <?php render_timeline($r['donation_status']); ?>
 </div>
 
-<div class="card mb-3" style="border-left:4px solid var(--blue); background:#F0F9FF;">
-    <h3 class="card-title" style="color:var(--blue);">🚚 Collection & Inventory</h3>
-    <p class="text-muted mb-2">The donor posted <strong><?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></strong>. Enter the actual quantity you collected to add it to your inventory.</p>
-    
-    <form method="post">
-        <?= csrf_field() ?>
-        <input type="hidden" name="action" value="mark_collected">
+<?php if ($r['donation_status'] === 'ngo_assigned'): ?>
+    <div class="card mb-3" style="border-left:4px solid var(--blue); background:#F0F9FF;">
+        <h3 class="card-title" style="color:var(--blue);">🚚 Collection & Inventory</h3>
+        <p class="text-muted mb-2">The donor posted <strong><?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></strong>. Enter the actual quantity you collected to add it to your inventory.</p>
         
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label">Collected Quantity (<?= sanitize($r['unit']) ?>) *</label>
-                <input type="number" step="any" name="collected_quantity" class="form-control" required value="<?= (float)$r['quantity'] ?>">
+        <form method="post">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="mark_collected">
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Collected Quantity (<?= sanitize($r['unit']) ?>) *</label>
+                    <input type="number" step="any" name="collected_quantity" class="form-control" required value="<?= (float)$r['quantity'] ?>">
+                </div>
             </div>
-        </div>
-        
-        <button class="btn btn-primary btn-lg">✅ Mark as Collected & Received at NGO</button>
-    </form>
-</div>
+            
+            <button class="btn btn-primary btn-lg">✅ Mark as Collected & Received at NGO</button>
+        </form>
+    </div>
+<?php endif; ?>
 
 <?php if ($r['donation_status'] === 'delivered'): ?>
-<div class="card mt-3">
-    <h3 class="card-title">📷 Upload Collection Proof (Optional)</h3>
-    <p class="text-muted mb-2">Upload a photo of the food at your NGO center to share with the donor.</p>
+    <div class="card mt-3">
+        <h3 class="card-title">📷 Upload Collection Proof (Optional)</h3>
+        <p class="text-muted mb-2">Upload a photo of the food at your NGO center to share with the donor.</p>
 
-    <form method="post" enctype="multipart/form-data">
-        <?= csrf_field() ?>
-        <input type="hidden" name="action" value="upload_proof">
-        
-        <div class="form-group">
-            <label class="form-label">Proof Photo *</label>
-            <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
-        </div>
+        <form method="post" enctype="multipart/form-data">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="upload_proof">
+            
+            <div class="form-group">
+                <label class="form-label">Proof Photo *</label>
+                <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
+            </div>
 
-        <div class="form-group">
-            <label class="form-label">Note (optional)</label>
-            <textarea name="delivery_note" class="form-control" rows="2" placeholder="e.g. Food arrived safely at NGO center."></textarea>
-        </div>
+            <div class="form-group">
+                <label class="form-label">Note (optional)</label>
+                <textarea name="delivery_note" class="form-control" rows="2" placeholder="e.g. Food arrived safely at NGO center."></textarea>
+            </div>
 
-        <button class="btn btn-primary">Upload Proof</button>
-    </form>
-</div>
+            <button class="btn btn-primary">Upload Proof</button>
+        </form>
+    </div>
 <?php endif; ?>
 
 <style>
