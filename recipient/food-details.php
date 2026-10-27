@@ -7,10 +7,12 @@ require_once __DIR__ . '/../includes/location-functions.php';
 $uid = current_user_id();
 $id  = int_get('id');
 
+// Load donation + NGO info + Inventory check
 $stmt = $pdo->prepare("
-    SELECT d.*, u.name AS donor_name, u.phone AS donor_phone
+    SELECT d.*, u.name AS ngo_name, u.phone AS ngo_phone,
+           (d.collected_quantity - d.distributed_quantity) AS available_qty
     FROM food_donations d
-    JOIN users u ON u.user_id = d.donor_id
+    JOIN users u ON u.user_id = d.ngo_id
     WHERE d.donation_id = :id
 ");
 $stmt->execute([':id' => $id]);
@@ -18,7 +20,7 @@ $d = $stmt->fetch();
 
 if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'recipient/available-food.php'); }
 
-// Recipient location
+// Distance calculation
 $me = $pdo->prepare("SELECT latitude, longitude FROM users WHERE user_id = :u");
 $me->execute([':u' => $uid]);
 $me = $me->fetch();
@@ -33,28 +35,15 @@ $mine = $pdo->prepare("SELECT request_id, status FROM food_requests WHERE donati
 $mine->execute([':d' => $id, ':u' => $uid]);
 $myRequest = $mine->fetch();
 
-// Is it still available? (status-based lock)
-$isAvailable = $d['status'] === 'available'
-    && (!$d['best_before'] || strtotime($d['best_before']) > time());
+// NEW LOGIC: Is it available based on NGO Inventory?
+$isAvailable = ($d['available_qty'] > 0) && in_array($d['status'], ['picked_up', 'distributing']);
 
 $lockReason = '';
 if (!$isAvailable) {
-    $lockReason = match ($d['status']) {
-        'requested'             => 'This food has already been requested.',
-        'accepted'              => 'The donor has accepted a request for this food.',
-        'collector_assigned',
-        'ngo_assigned',
-        'pickup_scheduled',
-        'picked_up',
-        'out_for_delivery'      => 'This donation is already in progress.',
-        'delivered',
-        'completed'             => 'This donation has been completed.',
-        'cancelled'             => 'This donation was cancelled.',
-        'expired'               => 'This donation has expired.',
-        default                 => 'This donation is no longer available.',
-    };
-    if ($isAvailable === false && $d['status'] === 'available' && $d['best_before'] && strtotime($d['best_before']) <= time()) {
-        $lockReason = 'This donation has expired.';
+    if ($d['available_qty'] <= 0) {
+        $lockReason = 'This food is fully distributed / out of stock.';
+    } else {
+        $lockReason = 'This donation is not ready for requests yet.';
     }
 }
 ?>
@@ -62,7 +51,7 @@ if (!$isAvailable) {
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($d['food_name']) ?></h2>
-        <?= status_badge($d['status']) ?>
+        <span class="badge badge-blue">🏢 <?= sanitize($d['ngo_name']) ?></span>
     </div>
 
     <div class="details-grid">
@@ -71,18 +60,13 @@ if (!$isAvailable) {
         <div>
             <p><strong>Category:</strong> <?= sanitize($d['food_category'] ?: '—') ?></p>
             <p><strong>Type:</strong> <?= sanitize($d['food_type'] ?: '—') ?></p>
-            <p><strong>Quantity:</strong> <?= (float)$d['quantity'] ?> <?= sanitize($d['unit']) ?></p>
-            <p><strong>People served:</strong> <?= (int)$d['people_served'] ?></p>
+            <p><strong>Available:</strong> <?= (float)$d['available_qty'] ?> <?= sanitize($d['unit']) ?></p>
             <p><strong>Best before:</strong> <?= $d['best_before'] ? date('d M Y, h:i A', strtotime($d['best_before'])) : '—' ?></p>
-            <p><strong>Urgency:</strong> <?= ucfirst(str_replace('_',' ',$d['urgency'])) ?></p>
-            <p><strong>Delivery:</strong> <?= ucwords(str_replace('_',' ',$d['delivery_preference'])) ?></p>
-            <p><strong>Partial requests:</strong> <?= $d['allow_partial_request'] ? 'Allowed' : 'Not allowed' ?></p>
             <p><strong>Location:</strong> <?= sanitize($d['area'] ?: $d['city']) ?>
                 <?php if ($distKm !== null): ?>
                     <span class="badge badge-blue">📍 <?= number_format($distKm, 1) ?> KM away</span>
                 <?php endif; ?>
             </p>
-            <p><strong>Donor:</strong> <?= sanitize($d['donor_name']) ?></p>
             <p class="text-muted">Posted <?= time_ago($d['created_at']) ?></p>
         </div>
     </div>
@@ -99,14 +83,13 @@ if (!$isAvailable) {
     <div class="card">
         <h3 class="card-title">Your Request</h3>
         <p>Status: <?= status_badge($myRequest['status']) ?></p>
-        <a href="<?= BASE_URL ?>recipient/request-details.php?id=<?= (int)$myRequest['request_id'] ?>"
-           class="btn btn-outline">View Request</a>
+        <a href="<?= BASE_URL ?>recipient/request-details.php?id=<?= (int)$myRequest['request_id'] ?>" class="btn btn-outline">View Request</a>
     </div>
 
 <?php elseif (!$isAvailable): ?>
     <div class="card">
         <div class="toast toast-info">
-            🔒 <?= sanitize($lockReason ?: 'This food is no longer available.') ?>
+            🔒 <?= sanitize($lockReason) ?>
         </div>
         <a href="<?= BASE_URL ?>recipient/available-food.php" class="btn btn-outline">← Back to Available Food</a>
     </div>
@@ -114,8 +97,8 @@ if (!$isAvailable) {
 <?php else: ?>
     <div class="card">
         <h3 class="card-title">Request This Food</h3>
-        <a href="<?= BASE_URL ?>recipient/request-food.php?id=<?= (int)$d['donation_id'] ?>"
-           class="btn btn-primary btn-lg">🍱 Request Food</a>
+        <p class="text-muted mb-2">This food is managed by <strong><?= sanitize($d['ngo_name']) ?></strong>.</p>
+        <a href="<?= BASE_URL ?>recipient/request-food.php?id=<?= (int)$d['donation_id'] ?>" class="btn btn-primary btn-lg">🍱 Request Food</a>
     </div>
 <?php endif; ?>
 
