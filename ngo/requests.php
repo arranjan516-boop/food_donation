@@ -36,16 +36,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$req) throw new Exception('Request not found.');
             if ($req['quantity'] > $req['live_qty']) throw new Exception('Not enough inventory.');
 
+            // 1. Approve request and save delivery method
             $pdo->prepare("UPDATE food_requests SET status='accepted', accepted_at=NOW(), delivery_method=:m WHERE request_id=:r")
                 ->execute([':m' => $deliveryMethod, ':r' => $reqId]);
             
+            // 2. Deduct from Inventory
             $pdo->prepare("UPDATE food_donations SET distributed_quantity = distributed_quantity + :q WHERE donation_id=:d")
                 ->execute([':q' => $req['quantity'], ':d' => $req['donation_id']]);
+
+            // 3. If collector is chosen, we don't change donation status yet. 
+            // The collector will update the status when they pick it up.
+            // If NGO delivers, we just leave it as 'picked_up'.
 
             $pdo->commit();
 
             notify($pdo, (int)$req['recipient_id'], '✅ Request Approved', 'Your food request has been approved. Delivery method: ' . strtoupper($deliveryMethod), 'request_accepted', $req['donation_id']);
-            set_flash('success', 'Request approved! Delivery method set to: ' . strtoupper($deliveryMethod));
+            set_flash('success', 'Request approved! Delivery method: ' . strtoupper($deliveryMethod));
 
         } catch (Exception $ex) {
             $pdo->rollBack();
@@ -61,6 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// Load pending requests
 $stmt = $pdo->prepare("
     SELECT fr.*, d.food_name, d.unit, u.name AS recipient_name
     FROM food_requests fr
