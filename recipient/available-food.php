@@ -1,86 +1,56 @@
 <?php
 // recipient/available-food.php
 $pageTitle = 'Available Food';
-$extraCss = ['food-grid.css'];
 require_once __DIR__ . '/../includes/dashboard-header.php';
 require_once __DIR__ . '/../includes/location-functions.php';
 
 $uid = current_user_id();
 
-// Recipient coords
+// Recipient coordinates
 $me = $pdo->prepare("SELECT latitude, longitude FROM users WHERE user_id = :u");
 $me->execute([':u' => $uid]);
 $me = $me->fetch();
-$myLat = $me['latitude']  !== null ? (float)$me['latitude']  : null;
-$myLng = $me['longitude'] !== null ? (float)$me['longitude'] : null;
+$myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['latitude']  : null;
+$myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
-// Filters
-$cat = get('category');
-$type = get('type');
-$urg = get('urgency');
-$search = get('q');
+// Fetch only food that has been collected by an NGO and has remaining inventory
+$sql = "
+    SELECT d.*, u.name AS ngo_name, u.city AS ngo_city, u.area AS ngo_area, u.latitude AS ngo_lat, u.longitude AS ngo_lng,
+           (d.collected_quantity - d.distributed_quantity) AS available_qty
+    FROM food_donations d
+    JOIN users u ON u.user_id = d.ngo_id
+    WHERE d.status IN ('picked_up', 'distributing')
+      AND (d.collected_quantity - d.distributed_quantity) > 0
+      AND u.is_verified = 1
+    ORDER BY d.created_at DESC
+";
+$all = $pdo->query($sql)->fetchAll();
 
-$sql = "SELECT d.*, u.name AS donor_name
-        FROM food_donations d
-        JOIN users u ON u.user_id = d.donor_id
-        WHERE d.status = 'available'
-          AND (d.best_before IS NULL OR d.best_before > NOW())";
-$params = [];
-if ($cat)    { $sql .= " AND d.food_category = :cat";  $params[':cat'] = $cat; }
-if ($type)   { $sql .= " AND d.food_type = :type";     $params[':type'] = $type; }
-if ($urg)    { $sql .= " AND d.urgency = :urg";        $params[':urg'] = $urg; }
-if ($search) { $sql .= " AND (d.food_name LIKE :q1 OR d.description LIKE :q2)";
-               $params[':q1'] = "%$search%";
-               $params[':q2'] = "%$search%"; }
-$sql .= " ORDER BY d.created_at DESC LIMIT 80";
+// Filter by 15 KM radius of the NGO
+$donations = [];
+if ($myLat !== null && $myLng !== null) {
+    foreach ($all as $d) {
+        if ($d['ngo_lat'] === null || $d['ngo_lng'] === null) continue;
 
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$all = $stmt->fetchAll();
+        $km = haversine_km($myLat, $myLng, (float)$d['ngo_lat'], (float)$d['ngo_lng']);
+        if ($km === null || $km > MATCH_RADIUS_KM) continue;
 
-// 15 KM filter
-$donations = ($myLat !== null && $myLng !== null)
-    ? filter_within_km($all, $myLat, $myLng, MATCH_RADIUS_KM)
-    : [];
-usort($donations, fn($a,$b) => $a['distance_km'] <=> $b['distance_km']);
+        $d['distance_km'] = round($km, 2);
+        $donations[] = $d;
+    }
+    usort($donations, fn($a, $b) => $a['distance_km'] <=> $b['distance_km']);
+}
 ?>
 
 <div class="toast toast-info mb-2" style="font-size:13px">
-    Showing donations within <strong><?= MATCH_RADIUS_KM ?> KM</strong> of your location.
-    <?php if ($myLat === null): ?>
-        Set your <a href="<?= BASE_URL ?>recipient/profile.php">location</a> to see nearby food.
-    <?php endif; ?>
+    Showing food available at verified NGOs within <strong><?= MATCH_RADIUS_KM ?> KM</strong> of your location.
 </div>
-
-<form method="get" class="filter-bar">
-    <input type="text" name="q" value="<?= sanitize($search) ?>" class="form-control" placeholder="🔍 Search...">
-    <select name="category" class="form-control">
-        <option value="">All Categories</option>
-        <?php foreach (['Rice','Meals','Curry','Bread','Fruits','Vegetables','Bakery','Snacks','Other'] as $c): ?>
-            <option value="<?= $c ?>" <?= $cat===$c?'selected':'' ?>><?= $c ?></option>
-        <?php endforeach; ?>
-    </select>
-    <select name="type" class="form-control">
-        <option value="">All Types</option>
-        <?php foreach (['Vegetarian','Non-Vegetarian','Vegan'] as $t): ?>
-            <option value="<?= $t ?>" <?= $type===$t?'selected':'' ?>><?= $t ?></option>
-        <?php endforeach; ?>
-    </select>
-    <select name="urgency" class="form-control">
-        <option value="">Any Urgency</option>
-        <option value="normal"      <?= $urg==='normal'?'selected':'' ?>>Normal</option>
-        <option value="urgent"      <?= $urg==='urgent'?'selected':'' ?>>Urgent</option>
-        <option value="very_urgent" <?= $urg==='very_urgent'?'selected':'' ?>>Very Urgent</option>
-    </select>
-    <button class="btn btn-primary">Filter</button>
-    <a href="?" class="btn btn-outline">Reset</a>
-</form>
 
 <?php if (!$donations): ?>
     <div class="empty-state">
         <div class="empty-icon">🍽️</div>
-        <h3>No donations within <?= MATCH_RADIUS_KM ?> KM</h3>
-        <p>Try again later or adjust filters.</p>
+        <h3>No food available nearby</h3>
+        <p>NGOs near you have not collected any food yet. Check back soon.</p>
     </div>
 <?php else: ?>
     <div class="food-grid">
@@ -92,7 +62,6 @@ usort($donations, fn($a,$b) => $a['distance_km'] <=> $b['distance_km']);
                     'normal'      => ['badge-yellow','Normal'],
                 ];
                 [$uCls,$uTxt] = $urgencyMap[$d['urgency']] ?? ['badge-gray',$d['urgency']];
-                $bb = $d['best_before'] ? date('d M, h:i A', strtotime($d['best_before'])) : '—';
             ?>
             <div class="food-card">
                 <img src="<?= food_photo_url($d['food_photo']) ?>" alt="">
@@ -102,17 +71,14 @@ usort($donations, fn($a,$b) => $a['distance_km'] <=> $b['distance_km']);
                         <span class="badge <?= $uCls ?>"><?= $uTxt ?></span>
                     </div>
                     <div class="food-card-meta">
-                        <span>🍽️ <?= (int)$d['people_served'] ?> meals</span>
-                        <span>🥗 <?= sanitize($d['food_type']) ?></span>
+                        <span>🏢 By <?= sanitize($d['ngo_name']) ?></span>
                     </div>
                     <div class="food-card-meta">
-                        <span>📍 <?= number_format($d['distance_km'],1) ?> KM</span>
-                        <span>⏰ <?= $bb ?></span>
+                        <span>📦 <?= (float)$d['available_qty'] ?> <?= sanitize($d['unit']) ?> available</span>
+                        <span>📍 <?= number_format($d['distance_km'], 1) ?> KM</span>
                     </div>
-                    <div class="food-card-meta text-muted">By <?= sanitize($d['donor_name']) ?></div>
                     <div class="food-card-actions">
-                        <a href="<?= BASE_URL ?>recipient/food-details.php?id=<?= (int)$d['donation_id'] ?>"
-                           class="btn btn-primary btn-sm">View Details</a>
+                        <a href="<?= BASE_URL ?>recipient/food-details.php?id=<?= (int)$d['donation_id'] ?>" class="btn btn-primary btn-sm">View & Request</a>
                     </div>
                 </div>
             </div>
