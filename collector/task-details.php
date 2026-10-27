@@ -13,25 +13,27 @@ if (current_role() !== 'collector' && current_role() !== 'admin') {
 
 $uid = current_user_id();
 $donationId = int_get('id');
+$requestId = int_get('request_id');
 
-// Load donation + NGO info
+// Load donation + NGO info + Recipient info
 $stmt = $pdo->prepare("
-    SELECT d.*, n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area, n.city AS ngo_city,
+    SELECT d.*, n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area,
            fr.request_id, fr.recipient_id, fr.quantity AS req_qty, r.name AS recipient_name, r.phone AS recipient_phone,
-           r.address AS recipient_address, r.area AS recipient_area, r.city AS recipient_city
+           r.address AS recipient_address, r.area AS recipient_area
     FROM food_donations d
     JOIN users n ON n.user_id = d.ngo_id
-    JOIN food_requests fr ON fr.donation_id = d.donation_id AND fr.delivery_method = 'collector'
+    JOIN food_requests fr ON fr.request_id = :rid
     JOIN users r ON r.user_id = fr.recipient_id
-    WHERE d.donation_id = :id AND d.status = 'picked_up' AND fr.status = 'accepted'
+    WHERE d.donation_id = :did
 ");
-$stmt->execute([':id' => $donationId]);
+$stmt->execute([':rid' => $requestId, ':did' => $donationId]);
 $d = $stmt->fetch();
-if (!$d) { set_flash('error', 'Donation not found or not available for collector.'); redirect(BASE_URL . 'collector/available-tasks.php'); }
+
+if (!$d) { set_flash('error', 'Task not found.'); redirect(BASE_URL . 'collector/available-tasks.php'); }
 
 // Check if I already accepted this
-$existing = $pdo->prepare("SELECT ct.* FROM collector_tasks ct JOIN food_requests fr ON fr.request_id = ct.request_id WHERE fr.donation_id = :d AND fr.recipient_id = :r AND ct.collector_id = :u AND ct.status IN ('accepted','pickup_started','picked_up','delivering','delivered','completed') LIMIT 1");
-$existing->execute([':d' => $donationId, ':r' => $d['recipient_id'], ':u' => $uid]);
+$existing = $pdo->prepare("SELECT ct.* FROM collector_tasks ct WHERE ct.request_id = :rid AND ct.collector_id = :u AND ct.status IN ('accepted','pickup_started','picked_up','delivering','delivered','completed') LIMIT 1");
+$existing->execute([':rid' => $requestId, ':u' => $uid]);
 $myTask = $existing->fetch();
 
 $errors = [];
