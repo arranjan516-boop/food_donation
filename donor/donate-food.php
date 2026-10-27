@@ -32,8 +32,6 @@ $old = [
     'pincode' => $user['pincode'] ?? '',
     'latitude' => $user['latitude'] ?? '',
     'longitude' => $user['longitude'] ?? '',
-    'pref_self' => 0, 'pref_collector' => 0, 'pref_ngo' => 0,
-    'allow_partial_request' => 1,
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -42,24 +40,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach ($old as $k => $_) {
         if (isset($_POST[$k])) $old[$k] = post($k);
     }
-    $old['pref_self']      = isset($_POST['pref_self'])      ? 1 : 0;
-    $old['pref_collector'] = isset($_POST['pref_collector']) ? 1 : 0;
-    $old['pref_ngo']       = isset($_POST['pref_ngo'])       ? 1 : 0;
-    $old['allow_partial_request'] = isset($_POST['allow_partial_request']) ? 1 : 0;
 
-    // ---- Basic Validation (No cross-checking between quantity and people) ----
     if ($old['food_name'] === '')  $errors[] = 'Food name is required.';
     if ($old['quantity'] === '' || (float)$old['quantity'] <= 0) $errors[] = 'Valid quantity is required.';
     if ($old['people_served'] === '' || (int)$old['people_served'] <= 0) $errors[] = 'Number of people served is required.';
     if ($old['city'] === '')       $errors[] = 'City is required for 15 KM matching.';
     if ($old['pincode'] === '')    $errors[] = 'Pincode is required.';
     if ($old['best_before'] === '')$errors[] = 'Best-before time is required.';
-    
-    if (!$old['pref_self'] && !$old['pref_collector'] && !$old['pref_ngo']) {
-        $errors[] = 'Select at least one delivery option (self / collector / NGO).';
-    }
 
-    // ---- Image Upload ----
     $photoName = null;
     if (!empty($_FILES['food_photo']['name'])) {
         $photoName = upload_image($_FILES['food_photo'], FOOD_UPLOAD, FOOD_UPLOAD_URL);
@@ -68,15 +56,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Food photo is required.';
     }
 
-    // ---- Delivery Preference Logic ----
-    $pref = 'any';
-    if ($old['pref_collector'] && !$old['pref_self'] && !$old['pref_ngo']) $pref = 'collector';
-    elseif ($old['pref_self'] && !$old['pref_collector'] && !$old['pref_ngo']) $pref = 'self_delivery';
-    elseif ($old['pref_ngo'] && !$old['pref_self'] && !$old['pref_collector']) $pref = 'ngo';
-    if (($old['pref_self'] + $old['pref_collector'] + $old['pref_ngo']) > 1) $pref = 'any';
-
-    // ---- Insert Data ----
     if (!$errors) {
+        // New Flow: Delivery is always handled by NGO
         $sql = "INSERT INTO food_donations
             (donor_id, food_name, food_category, description, quantity, unit,
              food_type, people_served, food_photo, preparation_time, best_before,
@@ -86,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             (:donor_id, :food_name, :food_category, :description, :quantity, :unit,
              :food_type, :people_served, :food_photo, :preparation_time, :best_before,
              :urgency, :address, :city, :area, :pincode, :latitude, :longitude,
-             :delivery_preference, :allow_partial, 'available')";
+             'ngo', 1, 'available')";
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -108,38 +89,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':pincode' => $old['pincode'],
             ':latitude' => $old['latitude'] !== '' ? (float)$old['latitude'] : null,
             ':longitude' => $old['longitude'] !== '' ? (float)$old['longitude'] : null,
-            ':delivery_preference' => $pref,
-            ':allow_partial' => $old['allow_partial_request'],
         ]);
 
         $donationId = (int)$pdo->lastInsertId();
 
-        // Log History
         $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by)
                        VALUES (:d, NULL, 'available', :u)")
             ->execute([':d' => $donationId, ':u' => $uid]);
 
-        // Notify Recipients (within 15 KM)
+        // NEW FLOW: Notify ONLY nearby verified NGOs
         if ($old['latitude'] !== '' && $old['longitude'] !== '') {
             $lat = (float)$old['latitude'];
             $lng = (float)$old['longitude'];
 
-            notify_nearby_role($pdo, 'recipient', $lat, $lng,
-                '🍱 New Food Donation',
-                $old['people_served'] . ' meals available: ' . $old['food_name'],
-                'new_donation', $donationId);
+            $ngos = users_within_km($pdo, 'ngo', $lat, $lng);
+            foreach ($ngos as $ngo) {
+                if ($ngo['is_verified']) {
+                    notify($pdo, $ngo['user_id'], '🏢 New Donation Available',
+                        'A donor nearby posted "' . $old['food_name'] . '".', 'new_donation', $donationId);
+                }
+            }
         }
 
         notify_admins($pdo, '📦 New Donation Posted',
             current_user()['name'] . ' posted "' . $old['food_name'] . '".',
             'new_donation', $donationId);
 
-        set_flash('success', 'Donation posted successfully! Nearby users have been notified.');
+        set_flash('success', 'Donation posted successfully! Nearby NGOs have been notified.');
         redirect(BASE_URL . 'donor/my-donations.php');
     }
 }
 
-// ---- NOW safe to output HTML ----
 $pageTitle = 'Donate Food';
 require_once __DIR__ . '/../includes/dashboard-header.php';
 ?>
@@ -180,7 +160,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="form-row">
         <div class="form-group">
             <label class="form-label">Quantity *</label>
-            <!-- Removed min/max limits so any number is accepted -->
             <input type="number" step="any" name="quantity" class="form-control" required value="<?= sanitize($old['quantity']) ?>">
         </div>
         <div class="form-group">
@@ -204,7 +183,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         </div>
         <div class="form-group">
             <label class="form-label">Number of People Served *</label>
-            <!-- Removed min/max limits and JS 'data-validate' so any number is accepted -->
             <input type="number" name="people_served" class="form-control" required value="<?= sanitize($old['people_served']) ?>">
         </div>
     </div>
@@ -261,39 +239,9 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <img id="food-preview" style="display:none;max-width:220px;margin-top:10px;border-radius:10px">
     </div>
 
-    <h3 class="card-title" style="margin-top:24px">Delivery Preference *</h3>
-    <p class="text-muted mb-2">Choose at least one — you can pick multiple.</p>
-
-    <div class="pref-grid">
-        <label class="pref-card">
-            <input type="checkbox" name="pref_self" <?= $old['pref_self']?'checked':'' ?>>
-            <div>
-                <strong>🚗 I Can Deliver Myself</strong>
-                <span>Donor → Recipient</span>
-            </div>
-        </label>
-
-        <label class="pref-card">
-            <input type="checkbox" name="pref_collector" <?= $old['pref_collector']?'checked':'' ?>>
-            <div>
-                <strong>🚴 I Need a Collector</strong>
-                <span>Donor → Collector → Recipient</span>
-            </div>
-        </label>
-
-        <label class="pref-card">
-            <input type="checkbox" name="pref_ngo" <?= $old['pref_ngo']?'checked':'' ?>>
-            <div>
-                <strong>🏢 NGO Can Handle This</strong>
-                <span>Donor → NGO → Recipient</span>
-            </div>
-        </label>
+    <div class="toast toast-info mt-3">
+        ℹ️ In this new workflow, your donation will be offered to <strong>Verified NGOs</strong> within 15 KM. They will collect the food and distribute it to recipients.
     </div>
-
-    <label style="margin-top:14px;display:block">
-        <input type="checkbox" name="allow_partial_request" <?= $old['allow_partial_request']?'checked':'' ?>>
-        Allow partial quantity requests
-    </label>
 
     <div class="mt-3">
         <button class="btn btn-primary btn-lg">Post Donation</button>
