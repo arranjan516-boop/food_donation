@@ -13,7 +13,7 @@ if (!$donationId) {
     redirect(BASE_URL . 'index.php');
 }
 
-// 1. Fetch Donation and Recipient Info
+// 1. Fetch Donation, NGO, and Recipient Info
 $stmt = $pdo->prepare("
     SELECT d.*, 
            fr.request_id AS accepted_request_id,
@@ -32,20 +32,33 @@ if (!$d) {
 }
 
 $isDonor = ((int)$d['donor_id'] === $uid);
+$isNgo = ((int)$d['ngo_id'] === $uid);
 $isRecipient = ((int)$d['recipient_id'] === $uid);
 $isAdmin = (current_role() === 'admin');
 
-if (!$isDonor && !$isRecipient && !$isAdmin) {
+if (!$isDonor && !$isNgo && !$isRecipient && !$isAdmin) {
     set_flash('error', 'You are not part of this chat.');
     redirect(BASE_URL . 'index.php');
 }
 
-if (!$d['recipient_id']) {
-    set_flash('error', 'No recipient assigned to this donation yet.');
+// Determine partner based on who is logged in
+$partnerId = 0;
+if ($isRecipient) {
+    $partnerId = (int)$d['ngo_id']; // Recipient chats with NGO
+} elseif ($isNgo) {
+    // If a recipient is assigned, NGO chats with Recipient. Otherwise, NGO chats with Donor.
+    $partnerId = $d['recipient_id'] ? (int)$d['recipient_id'] : (int)$d['donor_id'];
+} elseif ($isDonor) {
+    $partnerId = (int)$d['ngo_id']; // Donor chats with NGO
+} elseif ($isAdmin) {
+    $partnerId = $d['ngo_id'] ? (int)$d['ngo_id'] : (int)$d['donor_id'];
+}
+
+if (!$partnerId) {
+    set_flash('error', 'No chat partner available yet.');
     redirect(BASE_URL . 'index.php');
 }
 
-$partnerId = $isDonor ? (int)$d['recipient_id'] : (int)$d['donor_id'];
 $errors = [];
 
 // 2. Handle POST (Send Message)
@@ -56,20 +69,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($msg === '') {
         $errors[] = 'Message cannot be empty.';
     } else {
-        // Insert message
         $pdo->prepare("INSERT INTO messages (donation_id, sender_id, receiver_id, message) VALUES (:d, :s, :r, :m)")
             ->execute([':d' => $donationId, ':s' => $uid, ':r' => $partnerId, ':m' => $msg]);
 
-        // Mark incoming as read
         $pdo->prepare("UPDATE messages SET is_read = 1 WHERE donation_id = :d AND receiver_id = :u")
             ->execute([':d' => $donationId, ':u' => $uid]);
 
-        // Send notification
         notify($pdo, $partnerId, '💬 New Message', 
             current_user()['name'] . ' sent a message about "' . $d['food_name'] . '".',
             'chat', $donationId);
 
-        // Redirect to refresh and show new message
         redirect(BASE_URL . 'chat.php?donation_id=' . $donationId);
     }
 }
@@ -83,32 +92,21 @@ $msgs = $pdo->prepare("
       AND (m.sender_id = :u1 OR m.receiver_id = :u2)
     ORDER BY m.created_at ASC
 ");
-$msgs->execute([
-    ':d' => $donationId, 
-    ':u1' => $uid, 
-    ':u2' => $uid
-]);
+$msgs->execute([':d' => $donationId, ':u1' => $uid, ':u2' => $uid]);
 $messages = $msgs->fetchAll();
 
-// Mark incoming as read (again after fetching)
-$pdo->prepare("UPDATE messages SET is_read = 1 WHERE donation_id = :d AND receiver_id = :u")
-    ->execute([':d' => $donationId, ':u' => $uid]);
+$pdo->prepare("UPDATE messages SET is_read = 1 WHERE donation_id = :d AND receiver_id = :u")->execute([':d' => $donationId, ':u' => $uid]);
 
-// 4. Fetch Chat Partner Info (for the header)
+// 4. Fetch Chat Partner Info
 $pstmt = $pdo->prepare("SELECT name, role FROM users WHERE user_id = :u");
 $pstmt->execute([':u' => $partnerId]);
 $partner = $pstmt->fetch();
 
 // 5. Back URL logic
 $backUrl = BASE_URL . 'index.php';
-if ($isDonor) {
-    $backUrl = BASE_URL . 'donor/donation-details.php?id=' . $donationId;
-} elseif ($isRecipient) {
-    $reqId = $d['accepted_request_id'] ?? 0;
-    $backUrl = BASE_URL . 'recipient/request-details.php?id=' . $reqId;
-} elseif ($isAdmin) {
-    $backUrl = BASE_URL . 'admin/donations/view.php?id=' . $donationId;
-}
+if ($isDonor) { $backUrl = BASE_URL . 'donor/donation-details.php?id=' . $donationId; }
+elseif ($isRecipient) { $backUrl = BASE_URL . 'recipient/request-details.php?id=' . ($d['accepted_request_id'] ?? 0); }
+elseif ($isNgo) { $backUrl = BASE_URL . 'ngo/my-donations.php'; }
 
 $pageTitle = 'Chat — ' . $d['food_name']; 
 require_once __DIR__ . '/includes/dashboard-header.php'; 
@@ -139,9 +137,7 @@ require_once __DIR__ . '/includes/dashboard-header.php';
         <?php endif; ?>
     </div>
 
-    <?php if ($errors): ?>
-        <div class="toast toast-error"><?= sanitize($errors[0]) ?></div>
-    <?php endif; ?>
+    <?php if ($errors): ?><div class="toast toast-error"><?= sanitize($errors[0]) ?></div><?php endif; ?>
 
     <form method="post" class="chat-input">
         <?= csrf_field() ?>
@@ -151,7 +147,6 @@ require_once __DIR__ . '/includes/dashboard-header.php';
 </div>
 
 <script>
-    // Auto-scroll to bottom of chat
     const cw = document.getElementById('chatWindow');
     if (cw) cw.scrollTop = cw.scrollHeight;
 </script>
