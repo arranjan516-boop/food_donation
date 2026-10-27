@@ -8,7 +8,6 @@ require_login();
 $uid = current_user_id();
 $rid = int_get('id');
 
-// 1. Fetch Request and Donation Details
 $stmt = $pdo->prepare("
     SELECT fr.*, d.donation_id, d.food_name, d.food_photo, d.unit, d.donor_id, d.ngo_id, d.status AS donation_status,
            u.name AS donor_name, n.name AS ngo_name
@@ -23,44 +22,25 @@ $r = $stmt->fetch();
 
 if (!$r) { set_flash('error', 'Request not found.'); redirect(BASE_URL . 'recipient/my-requests.php'); }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'confirm_receipt') {
     verify_csrf();
-    $action = post('action');
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("UPDATE food_requests SET status='completed' WHERE request_id=:r")->execute([':r' => $rid]);
+        $pdo->prepare("UPDATE food_donations SET status='completed' WHERE donation_id=:d")->execute([':d' => $r['donation_id']]);
+        $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, :old, 'completed', :u)")
+            ->execute([':d' => $r['donation_id'], ':old' => $r['donation_status'], ':u' => $uid]);
+        $pdo->commit();
 
-    // 2. The Recipient Confirms Receipt
-    if ($action === 'confirm_receipt') {
-        $pdo->beginTransaction();
-        try {
-            // Update request to completed
-            $pdo->prepare("UPDATE food_requests SET status='completed' WHERE request_id=:r")->execute([':r' => $rid]);
-            
-            // Update donation to completed (this makes the tracker green!)
-            $pdo->prepare("UPDATE food_donations SET status='completed' WHERE donation_id=:d")->execute([':d' => $r['donation_id']]);
-
-            // History
-            $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, :old, 'completed', :u)")
-                ->execute([':d' => $r['donation_id'], ':old' => $r['donation_status'], ':u' => $uid]);
-
-            $pdo->commit();
-
-            // Notify NGO and Donor
-            if ($r['ngo_id']) {
-                notify($pdo, (int)$r['ngo_id'], '✅ Delivery Confirmed', 'Recipient confirmed receipt of the food.', 'completed', $r['donation_id']);
-            }
-            notify($pdo, (int)$r['donor_id'], '✅ Donation Completed', 'The food you donated has been successfully received.', 'completed', $r['donation_id']);
-            notify_admins($pdo, '✅ Donation Completed', 'Donation #' . $r['donation_id'] . ' is fully complete.', 'completed', $r['donation_id']);
-
-            set_flash('success', 'Thank you for confirming receipt!');
-            redirect(BASE_URL . 'recipient/request-details.php?id=' . $rid);
-
-        } catch (Exception $ex) {
-            $pdo->rollBack();
-            set_flash('error', 'Error: ' . $ex->getMessage());
-        }
+        if ($r['ngo_id']) notify($pdo, (int)$r['ngo_id'], '✅ Confirmed', 'Recipient confirmed receipt.', 'completed', $r['donation_id']);
+        set_flash('success', 'Thank you for confirming receipt!');
+        redirect(BASE_URL . 'recipient/request-details.php?id=' . $rid);
+    } catch (Exception $ex) {
+        $pdo->rollBack();
+        set_flash('error', 'Error: ' . $ex->getMessage());
     }
 }
 
-// 3. Fetch Delivery Proof (if any)
 $pf = $pdo->prepare("SELECT dp.*, u.name AS uploader_name FROM delivery_proofs dp JOIN users u ON u.user_id = dp.uploaded_by WHERE dp.request_id = :r ORDER BY uploaded_at DESC LIMIT 1");
 $pf->execute([':r' => $rid]);
 $proof = $pf->fetch();
@@ -83,14 +63,12 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <img src="<?= food_photo_url($r['food_photo']) ?>" alt="">
         <div>
             <p><strong>NGO:</strong> <?= sanitize($r['ngo_name'] ?: '—') ?></p>
-            <p><strong>Donor:</strong> <?= sanitize($r['donor_name']) ?></p>
             <p><strong>Requested qty:</strong> <?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></p>
             <p><strong>Delivery Method:</strong> <?= ucfirst($r['delivery_method']) ?></p>
         </div>
     </div>
 </div>
 
-<!-- Visual Timeline -->
 <div class="card mb-3" style="padding: 20px;">
     <?php render_timeline($r['donation_status']); ?>
 </div>
@@ -98,7 +76,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <?php if ($proof): ?>
     <div class="card mb-3">
         <h3 class="card-title">🍱 Delivery Proof</h3>
-        <p>A delivery proof photo is available. Please review and confirm receipt.</p>
         <img src="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>" style="max-width:280px;border-radius:12px;margin:10px 0" alt="">
         <p class="text-muted">Uploaded by <?= sanitize($proof['uploader_name']) ?> on <?= date('d M Y, h:i A', strtotime($proof['uploaded_at'])) ?></p>
     </div>
@@ -107,19 +84,11 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <?php if ($r['status'] === 'accepted'): ?>
     <div class="card">
         <h3 class="card-title">Actions</h3>
-        <?php if ($proof || $r['delivery_method'] === 'ngo'): ?>
-            <form method="post">
-                <?= csrf_field() ?>
-                <input type="hidden" name="action" value="confirm_receipt">
-                <button class="btn btn-primary btn-lg" data-confirm="Confirm you have received the food?">✅ Confirm Food Received</button>
-            </form>
-        <?php else: ?>
-            <p class="text-muted">Waiting for the Collector to upload delivery proof.</p>
-        <?php endif; ?>
-    </div>
-<?php elseif ($r['status'] === 'completed'): ?>
-    <div class="card">
-        <p style="font-size:16px; color:var(--green-dark); font-weight:600;">✅ This delivery is fully completed. Thank you!</p>
+        <form method="post">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="confirm_receipt">
+            <button class="btn btn-primary btn-lg" data-confirm="Confirm you have received the food?">✅ Confirm Food Received</button>
+        </form>
     </div>
 <?php endif; ?>
 
