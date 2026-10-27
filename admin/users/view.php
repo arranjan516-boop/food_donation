@@ -107,9 +107,7 @@ require_once __DIR__ . '/../../includes/dashboard-header.php';
                 <div><strong>Latitude:</strong> <?= sanitize($u['latitude'] ?: '—') ?></div>
                 <div><strong>Longitude:</strong> <?= sanitize($u['longitude'] ?: '—') ?></div>
                 <div><strong>Joined:</strong> <?= date('d M Y', strtotime($u['created_at'])) ?></div>
-                <div><strong>Last Login:</strong> 
-                    <?= $u['last_login'] ? date('d M Y, h:i A', strtotime($u['last_login'])) : '<span style="color:var(--gray-400);">Never logged in</span>' ?>
-                </div>
+                
                 <?php if ($stats): ?>
                     <div><strong>Activity:</strong> <?= (int)$stats['c'] ?> records</div>
                     <?php if (isset($stats['p'])): ?>
