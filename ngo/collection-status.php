@@ -39,23 +39,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $pdo->beginTransaction();
             try {
-                // 1. Update NGO request
+                // 1. Complete the NGO request
                 $pdo->prepare("UPDATE ngo_requests SET status='completed' WHERE ngo_request_id=:n")->execute([':n' => $nrId]);
                 
-                // 2. Update donation status AND save the inventory quantity
-                $pdo->prepare("UPDATE food_donations SET status='picked_up', collected_quantity=:q, ngo_id=:u WHERE donation_id=:d")
+                // 2. Update donation status, save quantity, AND start the 2-hour timer
+                $pdo->prepare("UPDATE food_donations SET status='picked_up', collected_quantity=:q, ngo_id=:u, collected_at=NOW() WHERE donation_id=:d")
                     ->execute([':q' => $collectedQty, ':u' => $uid, ':d' => $r['donation_id']]);
 
-                // 3. History
                 $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, 'ngo_assigned', 'picked_up', :u)")
                     ->execute([':d' => $r['donation_id'], ':u' => $uid]);
 
                 $pdo->commit();
 
-                notify($pdo, (int)$r['donor_id'], '🍱 Food Collected', 'Your donation "' . $r['food_name'] . '" has been collected by ' . current_user()['name'] . '.', 'ngo', $r['donation_id']);
-                notify_admins($pdo, '📦 NGO Collection', current_user()['name'] . ' collected ' . $collectedQty . ' ' . $r['unit'] . '.', 'ngo', $r['donation_id']);
-
-                set_flash('success', 'Food collected! Quantity added to your inventory.');
+                notify($pdo, (int)$r['donor_id'], '🍱 Food Collected', 'Your donation has been collected by ' . current_user()['name'] . '.', 'ngo', $r['donation_id']);
+                set_flash('success', 'Food collected! Quantity added to your inventory. You have 2 hours to distribute it.');
                 redirect(BASE_URL . 'ngo/my-donations.php');
             } catch (Exception $ex) {
                 $pdo->rollBack();
@@ -90,7 +87,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 
 <div class="card mb-3" style="border-left:4px solid var(--blue); background:#F0F9FF;">
     <h3 class="card-title" style="color:var(--blue);">🚚 Collection & Inventory</h3>
-    <p class="text-muted mb-2">The donor posted <strong><?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></strong>. Please enter the actual quantity you collected to add it to your inventory.</p>
+    <p class="text-muted mb-2">The donor posted <strong><?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></strong>. Enter the actual quantity you collected. <br><em>(Note: The 2-hour distribution timer starts as soon as you submit this).</em></p>
     
     <form method="post">
         <?= csrf_field() ?>
@@ -103,7 +100,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
             </div>
         </div>
         
-        <button class="btn btn-primary btn-lg">✅ Mark as Collected & Add to Inventory</button>
+        <button class="btn btn-primary btn-lg">✅ Mark as Collected & Start Timer</button>
     </form>
 </div>
 
