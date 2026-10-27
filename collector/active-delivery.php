@@ -1,166 +1,153 @@
 <?php
-// chat.php
-require_once __DIR__ . '/includes/functions.php';
-require_once __DIR__ . '/includes/auth.php';
-require_once __DIR__ . '/includes/notification-functions.php';
+// collector/active-delivery.php
+require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/notification-functions.php';
 
 require_login();
-$uid = current_user_id();
-$donationId = int_get('donation_id');
-
-if (!$donationId) {
-    set_flash('error', 'Invalid donation.');
+if (current_role() !== 'collector' && current_role() !== 'admin') {
+    set_flash('error', 'Access denied.');
     redirect(BASE_URL . 'index.php');
 }
+
+$uid = current_user_id();
+$taskId = int_get('id');
 
 $stmt = $pdo->prepare("
-    SELECT d.*, 
-           fr.request_id AS accepted_request_id,
-           fr.recipient_id
-    FROM food_donations d
-    LEFT JOIN food_requests fr ON fr.donation_id = d.donation_id AND fr.status IN ('accepted','completed')
-    WHERE d.donation_id = :id
-    LIMIT 1
+    SELECT ct.*, d.donation_id, d.food_name, d.food_photo, d.unit,
+           n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area, n.city AS ngo_city, n.latitude AS ngo_lat, n.longitude AS ngo_lng,
+           fr.recipient_id, fr.quantity AS req_qty, fr.contact_number AS recipient_phone, fr.delivery_address AS recipient_delivery_address,
+           r.name AS recipient_name, r.phone AS r_phone, r.address AS r_address, r.area AS r_area, r.city AS r_city, r.latitude AS r_lat, r.longitude AS r_lng
+    FROM collector_tasks ct
+    JOIN food_donations d ON d.donation_id = ct.donation_id
+    JOIN users n ON n.user_id = d.ngo_id
+    JOIN food_requests fr ON fr.request_id = ct.request_id
+    JOIN users r ON r.user_id = fr.recipient_id
+    WHERE ct.task_id = :t AND ct.collector_id = :u
 ");
-$stmt->execute([':id' => $donationId]);
-$d = $stmt->fetch();
+$stmt->execute([':t' => $taskId, ':u' => $uid]);
+$t = $stmt->fetch();
 
-if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'index.php'); }
+if (!$t) { set_flash('error', 'Task not found.'); redirect(BASE_URL . 'collector/my-tasks.php'); }
 
-$isDonor = ((int)$d['donor_id'] === $uid);
-$isNgo = ((int)$d['ngo_id'] === $uid);
-$isRecipient = ((int)$d['recipient_id'] === $uid);
-$isAdmin = (current_role() === 'admin');
-
-if (!$isDonor && !$isNgo && !$isRecipient && !$isAdmin) {
-    set_flash('error', 'You are not part of this chat.');
-    redirect(BASE_URL . 'index.php');
-}
-
-$partnerId = 0;
-if ($isRecipient) {
-    $partnerId = (int)$d['ngo_id'];
-} elseif ($isNgo) {
-    $partnerId = $d['recipient_id'] ? (int)$d['recipient_id'] : (int)$d['donor_id'];
-} elseif ($isDonor) {
-    $partnerId = (int)$d['ngo_id'];
-} elseif ($isAdmin) {
-    $partnerId = $d['ngo_id'] ? (int)$d['ngo_id'] : (int)$d['donor_id'];
-}
-
-if (!$partnerId) {
-    set_flash('error', 'No chat partner available yet.');
-    redirect(BASE_URL . 'index.php');
-}
+// Map URLs (Fixed to handle missing GPS)
+$ngoDest = (!empty($t['ngo_lat']) && $t['ngo_lat'] != 0) ? $t['ngo_lat'].','.$t['ngo_lng'] : $t['ngo_area'].', '.$t['ngo_city'];
+$recDest = (!empty($t['r_lat']) && $t['r_lat'] != 0) ? $t['r_lat'].','.$t['r_lng'] : ($t['recipient_delivery_address'] ?: $t['r_address']).', '.$t['r_area'].', '.$t['r_city'];
+$ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($ngoDest);
+$recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($recDest);
 
 $errors = [];
+$statusFlow = [
+    'accepted'       => ['pickup_started', '🚗 Start Pickup from NGO'],
+    'pickup_started' => ['picked_up',      '🍱 Food Collected'],
+    'picked_up'      => ['delivering',     '🚚 Start Delivery'],
+    'delivering'     => ['awaiting_proof', '📍 Reached Recipient'],
+];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
-    $msg = post('message');
-    
-    if ($msg === '') {
-        $errors[] = 'Message cannot be empty.';
-    } else {
-        $pdo->prepare("INSERT INTO messages (donation_id, sender_id, receiver_id, message) VALUES (:d, :s, :r, :m)")
-            ->execute([':d' => $donationId, ':s' => $uid, ':r' => $partnerId, ':m' => $msg]);
+    $action = post('action');
 
-        $pdo->prepare("UPDATE messages SET is_read = 1 WHERE donation_id = :d AND receiver_id = :u")
-            ->execute([':d' => $donationId, ':u' => $uid]);
+    if ($action === 'advance') {
+        $cur = $t['status'];
+        if (isset($statusFlow[$cur])) {
+            $next = $statusFlow[$cur][0];
+            $pdo->prepare("UPDATE collector_tasks SET status=:s WHERE task_id=:t")->execute([':s' => $next, ':t' => $taskId]);
+            set_flash('success', 'Status updated.');
+            redirect(BASE_URL . 'collector/active-delivery.php?id=' . $taskId);
+        }
+    }
 
-        notify($pdo, $partnerId, '💬 New Message', 
-            current_user()['name'] . ' sent a message about "' . $d['food_name'] . '".',
-            'chat', $donationId);
+    if ($action === 'upload_proof') {
+        $proof = upload_image($_FILES['proof_image'] ?? null, PROOF_UPLOAD, PROOF_UPLOAD_URL);
+        if (!$proof) {
+            $errors[] = 'Please upload a valid delivery proof photo.';
+        } else {
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("INSERT INTO deliveries (donation_id, request_id, method, collector_id, status, delivered_at) VALUES (:d, :r, 'collector', :c, 'delivered', NOW())")
+                    ->execute([':d' => $t['donation_id'], ':r' => $t['request_id'], ':c' => $uid]);
+                $deliveryId = (int)$pdo->lastInsertId();
 
-        redirect(BASE_URL . 'chat.php?donation_id=' . $donationId);
+                $pdo->prepare("INSERT INTO delivery_proofs (donation_id, request_id, delivery_id, uploaded_by, uploaded_by_role, proof_image, delivery_note) VALUES (:d, :r, :del, :u, 'collector', :img, :note)")
+                    ->execute([':d' => $t['donation_id'], ':r' => $t['request_id'], ':del' => $deliveryId, ':u' => $uid, ':img' => $proof, ':note' => post('delivery_note')]);
+
+                $pdo->prepare("UPDATE collector_tasks SET status='delivered', delivery_time=NOW() WHERE task_id=:t")->execute([':t' => $taskId]);
+                $pdo->prepare("UPDATE food_requests SET status='accepted' WHERE request_id=:r")->execute([':r' => $t['request_id']]);
+                
+                // Do NOT change donation status here. It stays at 'delivered' until the recipient confirms.
+
+                $pdo->commit();
+                notify($pdo, (int)$t['recipient_id'], '🍱 Food Delivered', 'Your food has been delivered. Please confirm receipt.', 'delivered', $t['donation_id']);
+                set_flash('success', 'Delivery proof submitted!');
+                redirect(BASE_URL . 'collector/completed-tasks.php');
+
+            } catch (Exception $ex) {
+                $pdo->rollBack();
+                $errors[] = 'Upload failed: ' . $ex->getMessage();
+            }
+        }
     }
 }
 
-$msgs = $pdo->prepare("
-    SELECT m.*, u.name AS sender_name, u.role AS sender_role
-    FROM messages m
-    JOIN users u ON u.user_id = m.sender_id
-    WHERE m.donation_id = :d
-      AND (m.sender_id = :u1 OR m.receiver_id = :u2)
-    ORDER BY m.created_at ASC
-");
-$msgs->execute([':d' => $donationId, ':u1' => $uid, ':u2' => $uid]);
-$messages = $msgs->fetchAll();
-
-$pdo->prepare("UPDATE messages SET is_read = 1 WHERE donation_id = :d AND receiver_id = :u")->execute([':d' => $donationId, ':u' => $uid]);
-
-// Fetch partner with is_verified column for the badge
-$pstmt = $pdo->prepare("SELECT name, role, is_verified FROM users WHERE user_id = :u");
-$pstmt->execute([':u' => $partnerId]);
-$partner = $pstmt->fetch();
-
-$backUrl = BASE_URL . 'index.php';
-if ($isDonor) { $backUrl = BASE_URL . 'donor/donation-details.php?id=' . $donationId; }
-elseif ($isRecipient) { $backUrl = BASE_URL . 'recipient/request-details.php?id=' . ($d['accepted_request_id'] ?? 0); }
-elseif ($isNgo) { $backUrl = BASE_URL . 'ngo/my-donations.php'; }
-
-$pageTitle = 'Chat — ' . $d['food_name']; 
-require_once __DIR__ . '/includes/dashboard-header.php'; 
+$pageTitle = 'Active Delivery';
+require_once __DIR__ . '/../includes/dashboard-header.php';
 ?>
 
-<div class="chat-layout">
-    <div class="chat-header">
+<?php if ($errors): ?>
+    <div class="toast toast-error"><?php foreach ($errors as $e): ?><?= sanitize($e) ?><br><?php endforeach; ?></div>
+<?php endif; ?>
+
+<div class="card mb-3">
+    <h2><?= sanitize($t['food_name']) ?> <?= status_badge($t['status']) ?></h2>
+    <div class="details-grid">
+        <img src="<?= food_photo_url($t['food_photo']) ?>" alt="">
         <div>
-            <h2>💬 <?= sanitize($d['food_name']) ?></h2>
-            <p class="text-muted">
-                Chat with <strong><?= sanitize($partner['name']) ?></strong> 
-                <?= verified_badge($partner['is_verified'] ?? 0, $partner['role']) ?> 
-                (<?= sanitize($partner['role']) ?>)
-            </p>
+            <h4>🏢 Pickup From (NGO)</h4>
+            <p><strong><?= sanitize($t['ngo_name']) ?></strong> (<?= sanitize($t['ngo_phone']) ?>)</p>
+            <p><?= sanitize($t['ngo_address']) ?>, <?= sanitize($t['ngo_area']) ?></p>
+            <a href="<?= $ngoMapUrl ?>" target="_blank" class="btn btn-outline btn-sm mt-2">🧭 Navigate to NGO</a>
         </div>
-        <a href="<?= $backUrl ?>" class="btn btn-outline btn-sm">← Back to Details</a>
     </div>
-
-    <div class="chat-window" id="chatWindow">
-        <?php if (!$messages): ?>
-            <p style="text-align:center;color:#999;padding:40px">No messages yet. Say hello!</p>
-        <?php else: ?>
-            <?php foreach ($messages as $m): ?>
-                <?php $mine = ((int)$m['sender_id'] === $uid); ?>
-                <div class="chat-msg <?= $mine ? 'mine' : 'theirs' ?>">
-                    <div class="chat-bubble">
-                        <small><strong><?= $mine ? 'You' : sanitize($m['sender_name']) ?></strong> · <?= time_ago($m['created_at']) ?></small>
-                        <p><?= nl2br(sanitize($m['message'])) ?></p>
-                    </div>
-                </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
-    </div>
-
-    <?php if ($errors): ?><div class="toast toast-error"><?= sanitize($errors[0]) ?></div><?php endif; ?>
-
-    <form method="post" class="chat-input">
-        <?= csrf_field() ?>
-        <input type="text" name="message" class="form-control" placeholder="Type your message..." autocomplete="off" autofocus required>
-        <button class="btn btn-primary">Send</button>
-    </form>
 </div>
 
-<script>
-    const cw = document.getElementById('chatWindow');
-    if (cw) cw.scrollTop = cw.scrollHeight;
-</script>
+<div class="card mb-3" style="border-left:4px solid var(--green); background:#F1F8E9">
+    <h4>🏁 Deliver To (Recipient)</h4>
+    <p><strong><?= sanitize($t['recipient_name']) ?></strong> (<?= sanitize($t['recipient_phone']) ?>)</p>
+    <p><?= sanitize($t['r_address']) ?>, <?= sanitize($t['r_area']) ?></p>
+    <a href="<?= $recipientMapUrl ?>" target="_blank" class="btn btn-outline btn-sm mt-2">🧭 Navigate to Recipient</a>
+</div>
+
+<?php if (isset($statusFlow[$t['status']])): ?>
+    <div class="card mb-3">
+        <form method="post">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="advance">
+            <button class="btn btn-primary btn-lg"><?= $statusFlow[$t['status']][1] ?></button>
+        </form>
+    </div>
+<?php endif; ?>
+
+<?php if (in_array($t['status'], ['delivering', 'awaiting_proof'], true)): ?>
+    <div class="card">
+        <h3 class="card-title">📷 Upload Delivery Proof</h3>
+        <form method="post" enctype="multipart/form-data">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="upload_proof">
+            <div class="form-group">
+                <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
+            </div>
+            <div class="form-group">
+                <textarea name="delivery_note" class="form-control" rows="2" placeholder="Delivery note"></textarea>
+            </div>
+            <button class="btn btn-primary btn-lg">Submit Delivery Proof</button>
+        </form>
+    </div>
+<?php endif; ?>
 
 <style>
-.chat-layout { max-width: 800px; margin: 0 auto; height: calc(100vh - 120px); display: flex; flex-direction: column; }
-.chat-header { background: #fff; padding: 20px 24px; border-radius: 16px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,.03); display: flex; justify-content: space-between; align-items: center; }
-.chat-window { background: #fff; border-radius: 16px; padding: 24px; flex: 1; overflow-y: auto; box-shadow: 0 4px 15px rgba(0,0,0,.03); margin-bottom: 20px; display: flex; flex-direction: column; gap: 16px; }
-.chat-msg { display: flex; }
-.chat-msg.mine { justify-content: flex-end; }
-.chat-msg.theirs { justify-content: flex-start; }
-.chat-bubble { max-width: 70%; padding: 14px 18px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
-.chat-msg.mine .chat-bubble { background: var(--green); color: #fff; border-bottom-right-radius: 4px; }
-.chat-msg.theirs .chat-bubble { background: #F3F4F6; color: var(--gray-900); border-bottom-left-radius: 4px; }
-.chat-bubble small { opacity: .8; font-size: 11px; display: block; margin-bottom: 4px; }
-.chat-bubble p { margin: 0; font-size: 15px; line-height: 1.4; }
-.chat-input { display: flex; gap: 12px; background: #fff; padding: 12px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,.03); }
-.chat-input .form-control { flex: 1; border-radius: 10px; background: #F9FAFB; border: 1px solid #eee; }
-.chat-input .btn { border-radius: 10px; padding: 0 24px; }
+.details-grid { display:grid; grid-template-columns: 260px 1fr; gap:20px; }
+.details-grid img { width:100%; border-radius:12px; }
 </style>
 
-<?php require_once __DIR__ . '/includes/dashboard-footer.php'; ?>
+<?php require_once __DIR__ . '/../includes/dashboard-footer.php'; ?>
