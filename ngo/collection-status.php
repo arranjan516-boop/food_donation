@@ -14,12 +14,9 @@ $uid = current_user_id();
 $nrId = int_get('id');
 
 $stmt = $pdo->prepare("
-    SELECT nr.*,
-           d.donation_id, d.donor_id, d.food_name, d.food_photo, d.unit,
-           d.quantity, d.people_served,
-           d.address AS pickup_address, d.area AS pickup_area, d.city AS pickup_city,
-           d.best_before, d.status AS donation_status,
-           u.name AS donor_name, u.phone AS donor_phone
+    SELECT nr.*, d.donation_id, d.donor_id, d.food_name, d.food_photo, d.unit,
+           d.quantity, d.people_served, d.address AS pickup_address, d.area AS pickup_area, d.city AS pickup_city,
+           d.best_before, d.status AS donation_status, u.name AS donor_name, u.phone AS donor_phone
     FROM ngo_requests nr
     JOIN food_donations d ON d.donation_id = nr.donation_id
     JOIN users u ON u.user_id = d.donor_id
@@ -29,62 +26,41 @@ $stmt->execute([':n' => $nrId, ':u' => $uid]);
 $r = $stmt->fetch();
 if (!$r) { set_flash('error', 'Record not found.'); redirect(BASE_URL . 'ngo/my-donations.php'); }
 
-// Find the accepted recipient (for delivery address)
-$recipient = null;
-$rq = $pdo->prepare("
-    SELECT fr.*, u.name AS recipient_name, u.phone AS recipient_phone,
-           u.address AS recipient_address, u.city AS recipient_city,
-           u.area AS recipient_area, u.latitude AS recipient_lat, u.longitude AS recipient_lng
-    FROM food_requests fr
-    JOIN users u ON u.user_id = fr.recipient_id
-    WHERE fr.donation_id = :d AND fr.status = 'accepted' LIMIT 1
-");
-$rq->execute([':d' => $r['donation_id']]);
-$recipient = $rq->fetch();
-
 $errors = [];
-
-// Define step-by-step button logic (Synced with donation status)
-$showNextButton = false;
-$nextStatus = '';
-$nextButtonText = '';
-
-if ($r['donation_status'] === 'ngo_assigned') {
-    $showNextButton = true;
-    $nextStatus = 'pickup_scheduled';
-    $nextButtonText = '🚗 Start Pickup';
-} elseif ($r['donation_status'] === 'pickup_scheduled') {
-    $showNextButton = true;
-    $nextStatus = 'picked_up';
-    $nextButtonText = '🍱 Mark as Collected';
-} elseif ($r['donation_status'] === 'picked_up') {
-    $showNextButton = true;
-    $nextStatus = 'out_for_delivery';
-    $nextButtonText = '🚚 Start Delivery';
-}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post('action');
 
-    // 1. Advance Status
-    if ($action === 'advance') {
-        $next = post('next_status');
-        if ($next) {
-            $pdo->prepare("UPDATE food_donations SET status=:s WHERE donation_id=:d")
-                ->execute([':s' => $next, ':d' => $r['donation_id']]);
+    if ($action === 'mark_collected') {
+        $collectedQty = (float)post('collected_quantity');
+        if ($collectedQty <= 0) {
+            $errors[] = 'Please enter a valid collected quantity.';
+        } else {
+            $pdo->beginTransaction();
+            try {
+                // 1. Update NGO request
+                $pdo->prepare("UPDATE ngo_requests SET status='completed' WHERE ngo_request_id=:n")->execute([':n' => $nrId]);
+                
+                // 2. Update donation status AND save the inventory quantity
+                $pdo->prepare("UPDATE food_donations SET status='picked_up', collected_quantity=:q, ngo_id=:u WHERE donation_id=:d")
+                    ->execute([':q' => $collectedQty, ':u' => $uid, ':d' => $r['donation_id']]);
 
-            $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) 
-                           VALUES (:d, :old, :new, :u)")
-                ->execute([':d' => $r['donation_id'], ':old' => $r['donation_status'], ':new' => $next, ':u' => $uid]);
+                // 3. History
+                $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, 'ngo_assigned', 'picked_up', :u)")
+                    ->execute([':d' => $r['donation_id'], ':u' => $uid]);
 
-            // If picked up, notify donor
-            if ($next === 'picked_up') {
-                notify($pdo, (int)$r['donor_id'], '🍱 Food Collected', 'Your donation has been collected by ' . current_user()['name'], 'ngo', $r['donation_id']);
+                $pdo->commit();
+
+                notify($pdo, (int)$r['donor_id'], '🍱 Food Collected', 'Your donation "' . $r['food_name'] . '" has been collected by ' . current_user()['name'] . '.', 'ngo', $r['donation_id']);
+                notify_admins($pdo, '📦 NGO Collection', current_user()['name'] . ' collected ' . $collectedQty . ' ' . $r['unit'] . '.', 'ngo', $r['donation_id']);
+
+                set_flash('success', 'Food collected! Quantity added to your inventory.');
+                redirect(BASE_URL . 'ngo/my-donations.php');
+            } catch (Exception $ex) {
+                $pdo->rollBack();
+                $errors[] = 'Error: ' . $ex->getMessage();
             }
-
-            set_flash('success', 'Status updated.');
-            redirect(BASE_URL . 'ngo/collection-status.php?id=' . $nrId);
         }
     }
 }
@@ -108,46 +84,28 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
             <h4>📍 Pickup From</h4>
             <p><strong><?= sanitize($r['donor_name']) ?></strong> (<?= sanitize($r['donor_phone']) ?>)</p>
             <p><?= sanitize($r['pickup_address']) ?>, <?= sanitize($r['pickup_area']) ?></p>
-            <p class="mt-2"><strong>Quantity:</strong> <?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></p>
         </div>
     </div>
 </div>
 
-<!-- Visual Timeline -->
-<div class="card mb-3" style="padding: 20px;">
-    <?php render_timeline($r['donation_status']); ?>
-</div>
-
-<!-- Next Step Button -->
-<?php if ($showNextButton): ?>
-    <div class="card mb-3">
-        <h3 class="card-title">Next Step</h3>
-        <form method="post">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="advance">
-            <input type="hidden" name="next_status" value="<?= $nextStatus ?>">
-            <button class="btn btn-primary btn-lg"><?= $nextButtonText ?></button>
-        </form>
-    </div>
-<?php endif; ?>
-
-<!-- If Delivery has started, show the Recipient info and link to Distribution page for proof -->
-<?php if (in_array($r['donation_status'], ['out_for_delivery', 'picked_up']) && $recipient): ?>
-    <div class="card mb-3" style="border-left:4px solid var(--green);background:#F1F8E9">
-        <h3 class="card-title" style="color:var(--green-dark)">🏁 Deliver To — Recipient Details</h3>
-        <div class="recipient-info mb-3">
-            <div><strong>Name:</strong> <?= sanitize($recipient['recipient_name']) ?></div>
-            <div><strong>Phone:</strong> <?= sanitize($recipient['recipient_phone'] ?: '—') ?></div>
-            <div style="grid-column:1/-1">
-                <strong>Address:</strong> <?= sanitize($recipient['recipient_address']) ?>, <?= sanitize($recipient['recipient_area']) ?>
+<div class="card mb-3" style="border-left:4px solid var(--blue); background:#F0F9FF;">
+    <h3 class="card-title" style="color:var(--blue);">🚚 Collection & Inventory</h3>
+    <p class="text-muted mb-2">The donor posted <strong><?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></strong>. Please enter the actual quantity you collected to add it to your inventory.</p>
+    
+    <form method="post">
+        <?= csrf_field() ?>
+        <input type="hidden" name="action" value="mark_collected">
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Collected Quantity (<?= sanitize($r['unit']) ?>) *</label>
+                <input type="number" step="any" name="collected_quantity" class="form-control" required value="<?= (float)$r['quantity'] ?>">
             </div>
         </div>
         
-        <a href="<?= BASE_URL ?>ngo/distribution.php?id=<?= $nrId ?>" class="btn btn-primary btn-lg">
-            📍 Reached Recipient & Upload Proof
-        </a>
-    </div>
-<?php endif; ?>
+        <button class="btn btn-primary btn-lg">✅ Mark as Collected & Add to Inventory</button>
+    </form>
+</div>
 
 <style>
 .details-grid { display:grid; grid-template-columns: 260px 1fr; gap:20px; }
