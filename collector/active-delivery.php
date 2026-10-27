@@ -30,9 +30,31 @@ $t = $stmt->fetch();
 
 if (!$t) { set_flash('error', 'Task not found.'); redirect(BASE_URL . 'collector/my-tasks.php'); }
 
-// Map URLs
-$ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode(($t['ngo_lat'] && $t['ngo_lng']) ? $t['ngo_lat'].','.$t['ngo_lng'] : $t['ngo_area'].' '.$t['ngo_city']) . '&travelmode=driving';
-$recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode(($t['r_lat'] && $t['r_lng']) ? $t['r_lat'].','.$t['r_lng'] : $t['r_area'].' '.$t['r_city']) . '&travelmode=driving';
+// ---- SMART MAP LINK GENERATION ----
+
+// NGO Destination Logic
+if (!empty($t['ngo_lat']) && !empty($t['ngo_lng'])) {
+    $ngoDestination = $t['ngo_lat'] . ',' . $t['ngo_lng'];
+} else {
+    // Fallback to text address if GPS is missing
+    $ngoDestination = trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city']);
+}
+$ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($ngoDestination) . '&travelmode=driving';
+
+// Recipient Destination Logic
+$rAddress = $t['recipient_address'] ?: $t['r_address'];
+$rArea = $t['r_area'];
+$rCity = $t['r_city'];
+
+if (!empty($t['r_lat']) && !empty($t['r_lng'])) {
+    $recipientDestination = $t['r_lat'] . ',' . $t['r_lng'];
+} else {
+    // Fallback to text address if GPS is missing
+    $recipientDestination = trim($rAddress . ', ' . $rArea . ', ' . $rCity);
+}
+$recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($recipientDestination) . '&travelmode=driving';
+
+// ---------------------------------
 
 $errors = [];
 $statusFlow = [
@@ -117,7 +139,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <div>
             <h4>🏢 Pickup From (NGO)</h4>
             <p><strong><?= sanitize($t['ngo_name']) ?></strong> (<?= sanitize($t['ngo_phone']) ?>)</p>
-            <p><?= sanitize($t['ngo_address']) ?>, <?= sanitize($t['ngo_area']) ?></p>
+            <p><?= sanitize($t['ngo_address']) ?>, <?= sanitize($t['ngo_area']) ?>, <?= sanitize($t['ngo_city']) ?></p>
             <a href="<?= $ngoMapUrl ?>" target="_blank" class="btn btn-outline btn-sm mt-2">🧭 Navigate to NGO</a>
         </div>
     </div>
@@ -126,7 +148,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <div class="card mb-3" style="border-left:4px solid var(--green); background:#F1F8E9">
     <h4>🏁 Deliver To (Recipient)</h4>
     <p><strong><?= sanitize($t['recipient_name']) ?></strong> (<?= sanitize($t['recipient_phone']) ?>)</p>
-    <p><?= sanitize($t['recipient_address']) ?>, <?= sanitize($t['r_area']) ?></p>
+    <p><?= sanitize($rAddress) ?>, <?= sanitize($rArea) ?>, <?= sanitize($rCity) ?></p>
     <a href="<?= $recipientMapUrl ?>" target="_blank" class="btn btn-outline btn-sm mt-2">🧭 Navigate to Recipient</a>
 </div>
 
