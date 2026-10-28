@@ -41,6 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $pdo->prepare("UPDATE ngo_requests SET status='completed' WHERE ngo_request_id=:n")->execute([':n' => $nrId]);
                 
+                // Update to 'delivered' so it shows up for the Recipient
                 $pdo->prepare("UPDATE food_donations SET status='delivered', collected_quantity=:q, ngo_id=:u, collected_at=NOW() WHERE donation_id=:d")
                     ->execute([':q' => $collectedQty, ':u' => $uid, ':d' => $r['donation_id']]);
 
@@ -69,7 +70,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $pdo->beginTransaction();
             try {
-                // 1. Create a deliveries record FIRST to satisfy the Foreign Key
                 $pdo->prepare("
                     INSERT INTO deliveries (donation_id, request_id, method, ngo_id, status, delivered_at, notes)
                     VALUES (:d, NULL, 'ngo', :n, 'delivered', NOW(), :note)
@@ -80,7 +80,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 $deliveryId = (int)$pdo->lastInsertId();
 
-                // 2. Insert the proof with the valid delivery_id
                 $pdo->prepare("
                     INSERT INTO delivery_proofs (donation_id, request_id, delivery_id, uploaded_by, uploaded_by_role, proof_image, delivery_note) 
                     VALUES (:d, NULL, :del, :u, 'ngo', :img, :note)
@@ -93,7 +92,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 
                 $pdo->commit();
-
                 notify($pdo, (int)$r['donor_id'], '📷 NGO Proof Uploaded', 'The NGO uploaded a photo of the food at their center.', 'proof', $r['donation_id']);
 
                 set_flash('success', 'Collection proof uploaded successfully.');
