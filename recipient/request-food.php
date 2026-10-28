@@ -42,7 +42,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            // Lock row to check inventory again safely
             $lock = $pdo->prepare("SELECT (collected_quantity - distributed_quantity) AS live_qty FROM food_donations WHERE donation_id = :d FOR UPDATE");
             $lock->execute([':d' => $donationId]);
             $live = $lock->fetch();
@@ -51,7 +50,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Quantity exceeds remaining available inventory.');
             }
 
-            // Insert Request
             $ins = $pdo->prepare("
                 INSERT INTO food_requests
                   (donation_id, recipient_id, quantity, message, delivery_preference, contact_number, delivery_address, status)
@@ -66,7 +64,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->commit();
 
-            // Notify NGO
             notify($pdo, (int)$d['ngo_id'], '📨 New Food Request',
                 current_user()['name'] . ' requested ' . $qty . ' ' . $d['unit'] . ' of "' . $d['food_name'] . '".',
                 'new_request', $donationId);
