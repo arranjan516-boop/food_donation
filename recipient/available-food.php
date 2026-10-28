@@ -14,7 +14,7 @@ $myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['lati
 $myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
 // Fetch food that has been collected by an NGO and has remaining inventory
-// We accept both 'picked_up' and 'delivered' statuses
+// FIXED: Added 'delivered' to the list of valid statuses
 $sql = "
     SELECT d.*, u.name AS ngo_name, u.city AS ngo_city, u.area AS ngo_area, u.latitude AS ngo_lat, u.longitude AS ngo_lng,
            (d.collected_quantity - d.distributed_quantity) AS available_qty
@@ -31,7 +31,7 @@ $all = $pdo->query($sql)->fetchAll();
 $donations = [];
 if ($myLat !== null && $myLng !== null) {
     foreach ($all as $d) {
-        // If NGO doesn't have coordinates, skip distance check but still show it (fallback)
+        // If NGO doesn't have coordinates, we still show it (fallback for testing)
         if ($d['ngo_lat'] !== null && $d['ngo_lng'] !== null) {
             $km = haversine_km($myLat, $myLng, (float)$d['ngo_lat'], (float)$d['ngo_lng']);
             if ($km !== null && $km <= MATCH_RADIUS_KM) {
@@ -39,12 +39,10 @@ if ($myLat !== null && $myLng !== null) {
                 $donations[] = $d;
             }
         } else {
-            // If NGO has no GPS, allow it to be seen (for testing)
             $d['distance_km'] = null;
             $donations[] = $d;
         }
     }
-    // Sort by distance
     usort($donations, function($a, $b) {
         if ($a['distance_km'] === null) return 1;
         if ($b['distance_km'] === null) return -1;
