@@ -3,7 +3,7 @@ require_once __DIR__ . '/config/database.php';
 
 // --- CHANGE THESE TWO LINES ---
 $new_email = 'admin@foodshare.local';  // Your current admin email
-$new_password = 'ARm2006!!';    // Put your new password here
+$new_password = 'ARm2006!';    // Put your new password here
 // ------------------------------
 
 $hash = password_hash($new_password, PASSWORD_DEFAULT);
