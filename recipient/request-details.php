@@ -8,6 +8,7 @@ require_login();
 $uid = current_user_id();
 $rid = int_get('id');
 
+// 1. Fetch Request & Donation Details
 $stmt = $pdo->prepare("
     SELECT fr.*, d.donation_id, d.food_name, d.food_photo, d.unit, d.donor_id, d.ngo_id, d.status AS donation_status,
            u.name AS donor_name, n.name AS ngo_name
@@ -26,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post('action');
 
-    // 1. Handle Rating Submission
+    // Handle Rating Submission
     if ($action === 'submit_rating') {
         $rating = (int)post('rating');
         $review = post('review');
@@ -42,28 +43,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // 2. Handle Confirm Receipt
+    // Handle Confirm Receipt
     if ($action === 'confirm_receipt') {
         $pdo->beginTransaction();
         try {
             $pdo->prepare("UPDATE food_requests SET status='completed' WHERE request_id=:r")->execute([':r' => $rid]);
             $pdo->prepare("UPDATE food_donations SET status='completed' WHERE donation_id=:d")->execute([':d' => $r['donation_id']]);
+            
+            $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, :old, 'completed', :u)")
+                ->execute([':d' => $r['donation_id'], ':old' => $r['donation_status'], ':u' => $uid]);
+
             $pdo->commit();
-            set_flash('success', 'Thank you for confirming!');
+            
+            if ($r['ngo_id']) notify($pdo, (int)$r['ngo_id'], '✅ Confirmed', 'Recipient confirmed receipt.', 'completed', $r['donation_id']);
+            notify($pdo, (int)$r['donor_id'], '✅ Completed', 'Your donated food was successfully received.', 'completed', $r['donation_id']);
+
+            set_flash('success', 'Thank you for confirming! Donation completed.');
             redirect(BASE_URL . 'recipient/request-details.php?id=' . $rid);
         } catch (Exception $ex) { $pdo->rollBack(); set_flash('error', $ex->getMessage()); }
     }
 }
 
+// 2. Fetch Delivery Proof
+$pf = $pdo->prepare("SELECT dp.*, u.name AS uploader_name FROM delivery_proofs dp JOIN users u ON u.user_id = dp.uploaded_by WHERE dp.request_id = :r ORDER BY uploaded_at DESC LIMIT 1");
+$pf->execute([':r' => $rid]);
+$proof = $pf->fetch();
+
 // 3. Check if I already rated this NGO
 $myRating = $pdo->prepare("SELECT * FROM ngo_ratings WHERE request_id = :r AND recipient_id = :u LIMIT 1");
 $myRating->execute([':r' => $rid, ':u' => $uid]);
 $myRating = $myRating->fetch();
-
-// 4. Fetch Delivery Proof
-$pf = $pdo->prepare("SELECT dp.*, u.name AS uploader_name FROM delivery_proofs dp JOIN users u ON u.user_id = dp.uploaded_by WHERE dp.request_id = :r ORDER BY uploaded_at DESC LIMIT 1");
-$pf->execute([':r' => $rid]);
-$proof = $pf->fetch();
 
 $pageTitle = 'Request Details';
 require_once __DIR__ . '/../includes/dashboard-header.php';
@@ -95,8 +104,20 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
+<!-- ACTION BUTTONS -->
+<?php if ($r['status'] === 'accepted' || ($r['donation_status'] === 'delivered' && $r['status'] !== 'completed')): ?>
+    <div class="card mb-3">
+        <h3 class="card-title">Actions</h3>
+        <form method="post">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="confirm_receipt">
+            <button class="btn btn-primary btn-lg" data-confirm="Confirm you have received the food?">✅ Confirm Food Received</button>
+        </form>
+    </div>
+<?php endif; ?>
+
+<!-- RATING SECTION -->
 <?php if ($r['status'] === 'completed'): ?>
-    <!-- NGO RATING SECTION -->
     <div class="card mb-3">
         <h3 class="card-title">Rate the NGO</h3>
         
@@ -136,25 +157,11 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
-<?php if ($r['status'] === 'accepted'): ?>
-    <div class="card">
-        <h3 class="card-title">Actions</h3>
-        <form method="post">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="confirm_receipt">
-            <button class="btn btn-primary btn-lg" data-confirm="Confirm you have received the food?">✅ Confirm Food Received</button>
-        </form>
-    </div>
-<?php endif; ?>
-
-<!-- Star Hover/Click Script -->
 <script>
+// Star hover/click script
 document.querySelectorAll('.star').forEach(star => {
-    star.addEventListener('mouseover', function() {
-        const val = parseInt(this.dataset.value);
-        updateStars(val);
-    });
-    star.addEventListener('mouseout', function() {
+    star.addEventListener('mouseover', function() { updateStars(parseInt(this.dataset.value)); });
+    star.addEventListener('mouseout', function() { 
         const checked = document.querySelector('input[name="rating"]:checked');
         updateStars(checked ? parseInt(checked.value) : 0);
     });
@@ -170,7 +177,6 @@ function updateStars(value) {
         s.style.color = parseInt(s.dataset.value) <= value ? '#FFD700' : '#ccc';
     });
 }
-// Initialize on page load
 const initial = document.querySelector('input[name="rating"]:checked');
 if (initial) updateStars(parseInt(initial.value));
 </script>
