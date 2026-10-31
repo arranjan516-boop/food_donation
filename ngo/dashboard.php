@@ -24,6 +24,11 @@ $inv = $pdo->prepare("
 $inv->execute([':u' => $uid]);
 $stats = $inv->fetch();
 
+// ---- NGO Rating Stats ----
+$ratingStmt = $pdo->prepare("SELECT AVG(rating) AS avg_rating, COUNT(*) AS total FROM ngo_ratings WHERE ngo_id = :u");
+$ratingStmt->execute([':u' => $uid]);
+$myRating = $ratingStmt->fetch();
+
 // ---- Pending Requests from Recipients ----
 $reqStmt = $pdo->prepare("
     SELECT COUNT(*) 
@@ -55,6 +60,8 @@ $activeCollections = $activeStmt->fetchAll();
         <div><div class="stat-value"><?= (float)$stats['total_distributed'] ?></div><div class="stat-label">Total Distributed</div></div></div>
     <div class="stat-card"><div class="icon-box yellow">📨</div>
         <div><div class="stat-value"><?= $pendingReqs ?></div><div class="stat-label">Pending Requests</div></div></div>
+    <div class="stat-card"><div class="icon-box yellow">⭐</div>
+        <div><div class="stat-value"><?= $myRating['total'] > 0 ? round($myRating['avg_rating'], 1) : 'N/A' ?></div><div class="stat-label">NGO Rating (<?= $myRating['total'] ?>)</div></div></div>
 </div>
 
 <!-- COLLECTIONS TO DO -->
