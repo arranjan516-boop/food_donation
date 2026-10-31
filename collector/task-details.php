@@ -43,15 +43,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'accept') {
     try {
         $pdo->beginTransaction();
         
+        // 1. Insert the task
         $ins = $pdo->prepare("
             INSERT INTO collector_tasks (request_id, donation_id, collector_id, status)
             VALUES (:r, :d, :c, 'accepted')
         ");
         $ins->execute([':r' => $d['request_id'], ':d' => $d['donation_id'], ':c' => $uid]);
         
+        // 2. Get the newly created Task ID
+        $newTaskId = (int)$pdo->lastInsertId();
+        
         $pdo->commit();
+        
         set_flash('success', 'Delivery task accepted! Navigate to the NGO to pick up the food.');
-        redirect(BASE_URL . 'collector/active-delivery.php?id=' . $pdo->lastInsertId());
+        
+        // 3. Redirect using the TASK ID, not the donation ID
+        redirect(BASE_URL . 'collector/active-delivery.php?id=' . $newTaskId);
+        
     } catch (Exception $ex) {
         $pdo->rollBack();
         $errors[] = $ex->getMessage();
