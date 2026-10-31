@@ -26,6 +26,11 @@ $stmt->execute([':n' => $nrId, ':u' => $uid]);
 $r = $stmt->fetch();
 if (!$r) { set_flash('error', 'Record not found.'); redirect(BASE_URL . 'ngo/my-donations.php'); }
 
+// CHECK IF PROOF ALREADY EXISTS
+$proofCheck = $pdo->prepare("SELECT * FROM delivery_proofs WHERE donation_id = :d AND uploaded_by_role = 'ngo' LIMIT 1");
+$proofCheck->execute([':d' => $r['donation_id']]);
+$existingProof = $proofCheck->fetch();
+
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -41,7 +46,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $pdo->prepare("UPDATE ngo_requests SET status='completed' WHERE ngo_request_id=:n")->execute([':n' => $nrId]);
                 
-                // Update to 'delivered' so it shows up for the Recipient
                 $pdo->prepare("UPDATE food_donations SET status='delivered', collected_quantity=:q, ngo_id=:u, collected_at=NOW() WHERE donation_id=:d")
                     ->execute([':q' => $collectedQty, ':u' => $uid, ':d' => $r['donation_id']]);
 
@@ -52,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 notify($pdo, (int)$r['donor_id'], '🍱 Food Delivered to NGO', 'Your donation has reached the NGO center.', 'ngo', $r['donation_id']);
                 set_flash('success', 'Food received at NGO. Quantity added to inventory.');
-                redirect(BASE_URL . 'ngo/my-donations.php');
+                redirect(BASE_URL . 'ngo/collection-status.php?id=' . $nrId);
             } catch (Exception $ex) {
                 $pdo->rollBack();
                 $errors[] = 'Error: ' . $ex->getMessage();
@@ -61,44 +65,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'upload_proof') {
-        $proof = null;
-        if (!empty($_FILES['proof_image']['name'])) {
-            $proof = upload_image($_FILES['proof_image'], PROOF_UPLOAD, PROOF_UPLOAD_URL);
-        }
-        if (!$proof) {
-            $errors[] = 'Please upload a valid photo.';
+        if ($existingProof) {
+            $errors[] = 'You have already uploaded the collection proof for this donation.';
         } else {
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare("
-                    INSERT INTO deliveries (donation_id, request_id, method, ngo_id, status, delivered_at, notes)
-                    VALUES (:d, NULL, 'ngo', :n, 'delivered', NOW(), :note)
-                ")->execute([
-                    ':d' => $r['donation_id'], 
-                    ':n' => $uid, 
-                    ':note' => post('delivery_note')
-                ]);
-                $deliveryId = (int)$pdo->lastInsertId();
+            $proof = null;
+            if (!empty($_FILES['proof_image']['name'])) {
+                $proof = upload_image($_FILES['proof_image'], PROOF_UPLOAD, PROOF_UPLOAD_URL);
+            }
+            if (!$proof) {
+                $errors[] = 'Please upload a valid photo.';
+            } else {
+                $pdo->beginTransaction();
+                try {
+                    $pdo->prepare("
+                        INSERT INTO deliveries (donation_id, request_id, method, ngo_id, status, delivered_at, notes)
+                        VALUES (:d, NULL, 'ngo', :n, 'delivered', NOW(), :note)
+                    ")->execute([
+                        ':d' => $r['donation_id'], 
+                        ':n' => $uid, 
+                        ':note' => post('delivery_note')
+                    ]);
+                    $deliveryId = (int)$pdo->lastInsertId();
 
-                $pdo->prepare("
-                    INSERT INTO delivery_proofs (donation_id, request_id, delivery_id, uploaded_by, uploaded_by_role, proof_image, delivery_note) 
-                    VALUES (:d, NULL, :del, :u, 'ngo', :img, :note)
-                ")->execute([
-                    ':d' => $r['donation_id'], 
-                    ':del' => $deliveryId, 
-                    ':u' => $uid, 
-                    ':img' => $proof, 
-                    ':note' => post('delivery_note')
-                ]);
-                
-                $pdo->commit();
-                notify($pdo, (int)$r['donor_id'], '📷 NGO Proof Uploaded', 'The NGO uploaded a photo of the food at their center.', 'proof', $r['donation_id']);
+                    $pdo->prepare("
+                        INSERT INTO delivery_proofs (donation_id, request_id, delivery_id, uploaded_by, uploaded_by_role, proof_image, delivery_note) 
+                        VALUES (:d, NULL, :del, :u, 'ngo', :img, :note)
+                    ")->execute([
+                        ':d' => $r['donation_id'], 
+                        ':del' => $deliveryId, 
+                        ':u' => $uid, 
+                        ':img' => $proof, 
+                        ':note' => post('delivery_note')
+                    ]);
+                    
+                    $pdo->commit();
+                    notify($pdo, (int)$r['donor_id'], '📷 NGO Proof Uploaded', 'The NGO uploaded a photo of the food at their center.', 'proof', $r['donation_id']);
 
-                set_flash('success', 'Collection proof uploaded successfully.');
-                redirect(BASE_URL . 'ngo/collection-status.php?id=' . $nrId);
-            } catch (Exception $ex) {
-                $pdo->rollBack();
-                $errors[] = 'Upload failed: ' . $ex->getMessage();
+                    set_flash('success', 'Collection proof uploaded successfully.');
+                    redirect(BASE_URL . 'ngo/collection-status.php?id=' . $nrId);
+                } catch (Exception $ex) {
+                    $pdo->rollBack();
+                    $errors[] = 'Upload failed: ' . $ex->getMessage();
+                }
             }
         }
     }
@@ -152,28 +160,42 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
-<?php if ($r['donation_status'] === 'delivered'): ?>
-    <div class="card mt-3">
-        <h3 class="card-title">📷 Upload Collection Proof (Optional)</h3>
-        <p class="text-muted mb-2">Upload a photo of the food at your NGO center to share with the donor.</p>
+<?php if ($r['donation_status'] === 'delivered' || $r['donation_status'] === 'picked_up'): ?>
+    
+    <?php if ($existingProof): ?>
+        <!-- Show Success Message Instead of Upload Form -->
+        <div class="card mt-3" style="border-left: 4px solid var(--green); background: #F1F8E9;">
+            <h3 class="card-title" style="color: var(--green-dark);">✅ Collection Proof Already Uploaded</h3>
+            <p class="text-muted">You have successfully submitted the collection proof for this donation.</p>
+            <img src="<?= PROOF_UPLOAD_URL . rawurlencode($existingProof['proof_image']) ?>" style="max-width:250px; border-radius:12px; margin-top:10px;" alt="Proof">
+            <br>
+            <a href="<?= BASE_URL ?>ngo/dashboard.php" class="btn btn-outline mt-3">← Back to Dashboard</a>
+        </div>
+    <?php else: ?>
+        <!-- Show Upload Form -->
+        <div class="card mt-3">
+            <h3 class="card-title">📷 Upload Collection Proof</h3>
+            <p class="text-muted mb-2">Upload a photo of the food at your NGO center to share with the donor.</p>
 
-        <form method="post" enctype="multipart/form-data">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="upload_proof">
-            
-            <div class="form-group">
-                <label class="form-label">Proof Photo *</label>
-                <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
-            </div>
+            <form method="post" enctype="multipart/form-data">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="upload_proof">
+                
+                <div class="form-group">
+                    <label class="form-label">Proof Photo *</label>
+                    <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
+                </div>
 
-            <div class="form-group">
-                <label class="form-label">Note (optional)</label>
-                <textarea name="delivery_note" class="form-control" rows="2" placeholder="e.g. Food arrived safely at NGO center."></textarea>
-            </div>
+                <div class="form-group">
+                    <label class="form-label">Note (optional)</label>
+                    <textarea name="delivery_note" class="form-control" rows="2" placeholder="e.g. Food arrived safely at NGO center."></textarea>
+                </div>
 
-            <button class="btn btn-primary">Upload Proof</button>
-        </form>
-    </div>
+                <button class="btn btn-primary">Upload Proof</button>
+            </form>
+        </div>
+    <?php endif; ?>
+
 <?php endif; ?>
 
 <style>
