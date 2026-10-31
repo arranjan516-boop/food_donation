@@ -13,11 +13,13 @@ if (current_role() !== 'collector' && current_role() !== 'admin') {
 $uid    = current_user_id();
 $taskId = int_get('id');
 
+// Fetch Task + NGO Profile + Recipient Profile
 $stmt = $pdo->prepare("
-    SELECT ct.*, d.donation_id, d.food_name, d.food_photo, d.unit, d.quantity AS total_qty,
-           n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area, n.city AS ngo_city, n.latitude AS ngo_lat, n.longitude AS ngo_lng,
-           fr.recipient_id, fr.quantity AS req_qty, fr.contact_number AS recipient_phone, fr.delivery_address AS recipient_delivery_address,
-           r.name AS recipient_name, r.phone AS r_phone, r.address AS r_address, r.area AS r_area, r.city AS r_city, r.latitude AS r_lat, r.longitude AS r_lng
+    SELECT ct.*, 
+           d.donation_id, d.food_name, d.food_photo, d.unit, d.quantity AS total_qty,
+           n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area, n.city AS ngo_city, n.pincode AS ngo_pincode, n.latitude AS ngo_lat, n.longitude AS ngo_lng,
+           fr.recipient_id, fr.quantity AS req_qty,
+           r.name AS recipient_name, r.phone AS recipient_phone, r.address AS r_address, r.area AS r_area, r.city AS r_city, r.pincode AS r_pincode, r.latitude AS r_lat, r.longitude AS r_lng
     FROM collector_tasks ct
     JOIN food_donations d ON d.donation_id = ct.donation_id
     JOIN users n ON n.user_id = d.ngo_id
@@ -32,22 +34,21 @@ if (!$t) { set_flash('error', 'Task not found.'); redirect(BASE_URL . 'collector
 
 // ---- SMART MAP LINK GENERATION ----
 
-// NGO Destination Logic
+// 1. NGO Destination (Uses NGO Profile Address)
 $ngoDest = '';
 if (!empty($t['ngo_lat']) && !empty($t['ngo_lng']) && $t['ngo_lat'] != 0) {
     $ngoDest = $t['ngo_lat'] . ',' . $t['ngo_lng'];
 } else {
-    $ngoDest = trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city']);
+    $ngoDest = trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city'] . ' ' . $t['ngo_pincode']);
 }
 $ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($ngoDest) . '&travelmode=driving';
 
-// Recipient Destination Logic
-$recAddress = $t['recipient_delivery_address'] ?: $t['r_address'];
+// 2. Recipient Destination (Uses Recipient Profile Address)
 $recDest = '';
 if (!empty($t['r_lat']) && !empty($t['r_lng']) && $t['r_lat'] != 0) {
     $recDest = $t['r_lat'] . ',' . $t['r_lng'];
 } else {
-    $recDest = trim($recAddress . ', ' . $t['r_area'] . ', ' . $t['r_city']);
+    $recDest = trim($t['r_address'] . ', ' . $t['r_area'] . ', ' . $t['r_city'] . ' ' . $t['r_pincode']);
 }
 $recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($recDest) . '&travelmode=driving';
 
@@ -126,7 +127,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="toast toast-error"><?php foreach ($errors as $e): ?><?= sanitize($e) ?><br><?php endforeach; ?></div>
 <?php endif; ?>
 
-<!-- MAIN FOOD CARD -->
+<!-- PICKUP CARD (NGO Profile) -->
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($t['food_name']) ?></h2>
@@ -137,9 +138,8 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <div>
             <h4>🏢 Pickup From (NGO)</h4>
             <p><strong><?= sanitize($t['ngo_name']) ?></strong> (<?= sanitize($t['ngo_phone']) ?>)</p>
-            <p><?= sanitize($t['ngo_address']) ?>, <?= sanitize($t['ngo_area']) ?>, <?= sanitize($t['ngo_city']) ?></p>
+            <p><?= sanitize($t['ngo_address']) ?>, <?= sanitize($t['ngo_area']) ?>, <?= sanitize($t['ngo_city']) ?> - <?= sanitize($t['ngo_pincode']) ?></p>
             
-            <!-- Show NGO Map ONLY if picking up -->
             <?php if (in_array($t['status'], ['accepted', 'pickup_started'])): ?>
                 <a href="<?= $ngoMapUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">🧭 Navigate to NGO</a>
             <?php endif; ?>
@@ -147,12 +147,12 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 </div>
 
-<!-- RECIPIENT CARD (Only shows after food is collected) -->
+<!-- DELIVERY CARD (Recipient Profile) -->
 <?php if (in_array($t['status'], ['picked_up', 'delivering', 'awaiting_proof'])): ?>
 <div class="card mb-3" style="border-left:4px solid var(--green); background:#F1F8E9">
     <h4>🏁 Deliver To (Recipient)</h4>
     <p><strong><?= sanitize($t['recipient_name']) ?></strong> (<?= sanitize($t['recipient_phone']) ?>)</p>
-    <p><?= sanitize($recAddress) ?>, <?= sanitize($t['r_area']) ?>, <?= sanitize($t['r_city']) ?></p>
+    <p><?= sanitize($t['r_address']) ?>, <?= sanitize($t['r_area']) ?>, <?= sanitize($t['r_city']) ?> - <?= sanitize($t['r_pincode']) ?></p>
     
     <a href="<?= $recipientMapUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">🧭 Navigate to Recipient</a>
 </div>
