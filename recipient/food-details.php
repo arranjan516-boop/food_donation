@@ -20,6 +20,11 @@ $d = $stmt->fetch();
 
 if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'recipient/available-food.php'); }
 
+// Calculate NGO Rating
+$avg = $pdo->prepare("SELECT AVG(rating) AS avg_rating, COUNT(*) AS total FROM ngo_ratings WHERE ngo_id = :n");
+$avg->execute([':n' => $d['ngo_id']]);
+$ratingInfo = $avg->fetch();
+
 // Distance calculation
 $me = $pdo->prepare("SELECT latitude, longitude FROM users WHERE user_id = :u");
 $me->execute([':u' => $uid]);
@@ -63,6 +68,18 @@ if (!$isAvailable) {
             <p><strong>Type:</strong> <?= sanitize($d['food_type'] ?: '—') ?></p>
             <p><strong>Available:</strong> <?= (float)$d['available_qty'] ?> <?= sanitize($d['unit']) ?></p>
             <p><strong>Best before:</strong> <?= $d['best_before'] ? date('d M Y, h:i A', strtotime($d['best_before'])) : '—' ?></p>
+            
+            <!-- NGO RATING DISPLAY -->
+            <p><strong>NGO Rating:</strong> 
+                <?php if ($ratingInfo['total'] > 0): ?>
+                    <span style="color:#FFD700; font-size:18px;">★</span> 
+                    <strong><?= round($ratingInfo['avg_rating'], 1) ?></strong>
+                    <small class="text-muted">(<?= $ratingInfo['total'] ?> reviews)</small>
+                <?php else: ?>
+                    <span class="text-muted">No reviews yet</span>
+                <?php endif; ?>
+            </p>
+
             <p><strong>Location:</strong> <?= sanitize($d['area'] ?: $d['city']) ?>
                 <?php if ($distKm !== null): ?>
                     <span class="badge badge-blue">📍 <?= number_format($distKm, 1) ?> KM away</span>
