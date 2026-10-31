@@ -15,11 +15,13 @@ $uid = current_user_id();
 $donationId = int_get('id');
 $requestId = int_get('request_id');
 
-// Load donation + NGO info + Recipient info
+// Load donation + NGO PROFILE info + Recipient PROFILE info
 $stmt = $pdo->prepare("
-    SELECT d.*, n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area,
-           fr.request_id, fr.recipient_id, fr.quantity AS req_qty, r.name AS recipient_name, r.phone AS recipient_phone,
-           r.address AS recipient_address, r.area AS recipient_area
+    SELECT d.*, 
+           n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area, n.city AS ngo_city, n.pincode AS ngo_pincode,
+           fr.request_id, fr.recipient_id, fr.quantity AS req_qty, 
+           r.name AS recipient_name, r.phone AS recipient_phone,
+           r.address AS recipient_address, r.area AS recipient_area, r.city AS recipient_city, r.pincode AS recipient_pincode
     FROM food_donations d
     JOIN users n ON n.user_id = d.ngo_id
     JOIN food_requests fr ON fr.request_id = :rid
@@ -43,21 +45,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'accept') {
     try {
         $pdo->beginTransaction();
         
-        // 1. Insert the task
         $ins = $pdo->prepare("
             INSERT INTO collector_tasks (request_id, donation_id, collector_id, status)
             VALUES (:r, :d, :c, 'accepted')
         ");
         $ins->execute([':r' => $d['request_id'], ':d' => $d['donation_id'], ':c' => $uid]);
         
-        // 2. Get the newly created Task ID
         $newTaskId = (int)$pdo->lastInsertId();
         
         $pdo->commit();
         
         set_flash('success', 'Delivery task accepted! Navigate to the NGO to pick up the food.');
-        
-        // 3. Redirect using the TASK ID, not the donation ID
         redirect(BASE_URL . 'collector/active-delivery.php?id=' . $newTaskId);
         
     } catch (Exception $ex) {
@@ -81,12 +79,12 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <div>
             <h4>🏢 Pickup From (NGO)</h4>
             <p><strong><?= sanitize($d['ngo_name']) ?></strong></p>
-            <p><?= sanitize($d['ngo_address']) ?>, <?= sanitize($d['ngo_area']) ?></p>
+            <p><?= sanitize($d['ngo_address']) ?>, <?= sanitize($d['ngo_area']) ?>, <?= sanitize($d['ngo_city']) ?> - <?= sanitize($d['ngo_pincode']) ?></p>
             <p><strong>Phone:</strong> <?= sanitize($d['ngo_phone']) ?></p>
             
             <h4 style="margin-top:16px">🏁 Deliver To (Recipient)</h4>
             <p><strong><?= sanitize($d['recipient_name']) ?></strong></p>
-            <p><?= sanitize($d['recipient_address']) ?>, <?= sanitize($d['recipient_area']) ?></p>
+            <p><?= sanitize($d['recipient_address']) ?>, <?= sanitize($d['recipient_area']) ?>, <?= sanitize($d['recipient_city']) ?> - <?= sanitize($d['recipient_pincode']) ?></p>
             <p><strong>Phone:</strong> <?= sanitize($d['recipient_phone']) ?></p>
             
             <p style="margin-top:16px"><strong>Quantity:</strong> <?= (float)$d['req_qty'] ?> <?= sanitize($d['unit']) ?></p>
