@@ -7,7 +7,8 @@ $uid = current_user_id();
 
 $stmt = $pdo->prepare("
     SELECT d.*, u.name AS donor_name,
-           (d.collected_quantity - d.distributed_quantity) AS remaining_qty
+           (d.collected_quantity - d.distributed_quantity) AS remaining_qty,
+           TIMESTAMPDIFF(MINUTE, NOW(), DATE_ADD(d.collected_at, INTERVAL 2 HOUR)) AS minutes_left
     FROM food_donations d
     JOIN users u ON u.user_id = d.donor_id
     WHERE d.ngo_id = :u AND d.collected_quantity > 0
@@ -31,8 +32,8 @@ $batches = $stmt->fetchAll();
                     <th>Donor</th>
                     <th>Collected</th>
                     <th>Distributed</th>
-                    <th>Inventory Level</th>
-                    <th>Remaining</th>
+                    <th>Remaining (Available)</th>
+                    <th>Status / Time Left</th>
                 </tr>
             </thead>
             <tbody>
@@ -41,6 +42,11 @@ $batches = $stmt->fetchAll();
                     $percent = $b['collected_quantity'] > 0 
                         ? ($b['distributed_quantity'] / $b['collected_quantity']) * 100 
                         : 0;
+                        
+                    $isExpired = in_array($b['status'], ['expired', 'completed', 'cancelled']);
+                    $isOutOfStock = $b['remaining_qty'] <= 0;
+                    $isExpiringSoon = (!$isExpired && !$isOutOfStock && $b['minutes_left'] !== null && $b['minutes_left'] <= 30 && $b['minutes_left'] > 0);
+                    $timeIsUp = (!$isExpired && !$isOutOfStock && $b['minutes_left'] !== null && $b['minutes_left'] <= 0);
                 ?>
                 <tr>
                     <td class="flex gap-1" style="align-items:center">
@@ -50,17 +56,38 @@ $batches = $stmt->fetchAll();
                     <td><?= sanitize($b['donor_name']) ?></td>
                     <td><?= (float)$b['collected_quantity'] ?> <?= sanitize($b['unit']) ?></td>
                     <td><?= (float)$b['distributed_quantity'] ?> <?= sanitize($b['unit']) ?></td>
-                    <td style="width:250px;">
-                        <div style="background:#E5E7EB; height:12px; border-radius:20px; overflow:hidden; margin-top:10px;">
-                            <div style="width:<?= $percent ?>%; background: var(--green); height:100%; transition: width 0.3s;"></div>
-                        </div>
-                        <small class="text-muted"><?= round($percent) ?>% distributed</small>
-                    </td>
+                    
+                    <!-- Remaining Quantity Display -->
                     <td>
-                        <?php if ($b['remaining_qty'] > 0): ?>
-                            <span class="badge badge-green" style="font-size:14px;"><?= (float)$b['remaining_qty'] ?> <?= sanitize($b['unit']) ?></span>
+                        <?php if ($isOutOfStock): ?>
+                            <span class="badge badge-red">0 (Out of Stock)</span>
                         <?php else: ?>
-                            <span class="badge badge-red">Out of Stock</span>
+                            <span class="badge badge-green" style="font-size:14px;"><?= (float)$b['remaining_qty'] ?> <?= sanitize($b['unit']) ?></span>
+                            <div style="background:#E5E7EB; height:8px; border-radius:20px; margin-top:6px; max-width:150px;">
+                                <div style="width:<?= 100 - $percent ?>%; background: var(--green); height:100%; border-radius:20px;"></div>
+                            </div>
+                        <?php endif; ?>
+                    </td>
+
+                    <!-- Status & Expiry Timer Display -->
+                    <td>
+                        <?php if ($isExpired || $timeIsUp): ?>
+                            <span class="badge badge-red">🔴 Expired</span>
+                            <br><small class="text-muted" style="font-size:11px;">Not available to recipients</small>
+                        <?php elseif ($isOutOfStock): ?>
+                            <span class="badge badge-gray">✅ Fully Distributed</span>
+                        <?php else: ?>
+                            <span class="badge badge-blue" style="margin-bottom:4px;">🟢 Active</span>
+                            <br>
+                            <?php if ($isExpiringSoon): ?>
+                                <span class="text-muted" style="font-size:12px; color:var(--orange); font-weight:600;">
+                                    ⚠️ Expires in <?= $b['minutes_left'] ?> minutes!
+                                </span>
+                            <?php elseif ($b['minutes_left'] !== null): ?>
+                                <span class="text-muted" style="font-size:12px;">
+                                    ⏱️ <?= floor($b['minutes_left'] / 60) ?>h <?= $b['minutes_left'] % 60 ?>m left
+                                </span>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </td>
                 </tr>
