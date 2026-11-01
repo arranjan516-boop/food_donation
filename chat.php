@@ -13,19 +13,23 @@ if (!$donationId) {
     redirect(BASE_URL . 'index.php');
 }
 
+// Fetch Donation, NGO, and Recipient
 $stmt = $pdo->prepare("
     SELECT d.*, 
            fr.request_id AS accepted_request_id,
            fr.recipient_id
     FROM food_donations d
-    LEFT JOIN food_requests fr ON fr.donation_id = d.donation_id AND fr.status IN ('accepted','completed')
+    LEFT JOIN food_requests fr ON fr.donation_id = d.donation_id AND fr.status IN ('pending','accepted','completed')
     WHERE d.donation_id = :id
-    LIMIT 1
+    ORDER BY fr.requested_at DESC LIMIT 1
 ");
 $stmt->execute([':id' => $donationId]);
 $d = $stmt->fetch();
 
-if (!$d) { set_flash('error', 'Donation not found.'); redirect(BASE_URL . 'index.php'); }
+if (!$d) { 
+    set_flash('error', 'Donation not found.'); 
+    redirect(BASE_URL . 'index.php'); 
+}
 
 $isDonor = ((int)$d['donor_id'] === $uid);
 $isNgo = ((int)$d['ngo_id'] === $uid);
@@ -37,9 +41,10 @@ if (!$isDonor && !$isNgo && !$isRecipient && !$isAdmin) {
     redirect(BASE_URL . 'index.php');
 }
 
+// Determine partner
 $partnerId = 0;
 if ($isRecipient) {
-    $partnerId = (int)$d['ngo_id'];
+    $partnerId = (int)$d['ngo_id']; // Recipient chats with NGO
 } elseif ($isNgo) {
     $partnerId = $d['recipient_id'] ? (int)$d['recipient_id'] : (int)$d['donor_id'];
 } elseif ($isDonor) {
