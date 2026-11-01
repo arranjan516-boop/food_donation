@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
             
-            // 1. Lock the row to prevent race conditions
+            // 1. Lock the row
             $stmt = $pdo->prepare("
                 SELECT fr.*, d.donation_id, d.ngo_id, d.unit, (d.collected_quantity - d.distributed_quantity) AS live_qty
                 FROM food_requests fr
@@ -37,21 +37,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$req) throw new Exception('Request not found.');
             if ($req['quantity'] > $req['live_qty']) throw new Exception('Not enough inventory.');
 
-            // 2. Update the request to 'accepted'
+            // 2. Update request status
             $pdo->prepare("UPDATE food_requests SET status='accepted', accepted_at=NOW(), delivery_method=:m WHERE request_id=:r")
                 ->execute([':m' => $deliveryMethod, ':r' => $reqId]);
             
-            // 3. Deduct from Inventory (distributed_quantity goes up)
+            // 3. Deduct Inventory
             $pdo->prepare("UPDATE food_donations SET distributed_quantity = distributed_quantity + :q WHERE donation_id=:d")
                 ->execute([':q' => $req['quantity'], ':d' => $req['donation_id']]);
 
-            // Note: We DO NOT change the donation status here. It remains 'picked_up' or 'delivered'
-            // so the remaining quantity is still visible to other recipients.
-
             $pdo->commit();
-
             notify($pdo, (int)$req['recipient_id'], '✅ Request Approved', 'Your food request has been approved.', 'request_accepted', $req['donation_id']);
-            set_flash('success', 'Request approved! Remaining inventory updated.');
+            set_flash('success', 'Request approved!');
 
         } catch (Exception $ex) { 
             $pdo->rollBack(); 
@@ -64,11 +60,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'approve_collector') {
         try {
             $pdo->beginTransaction();
-            // 1. Approve this collector task
+            
+            // 1. Approve collector
             $pdo->prepare("UPDATE collector_tasks SET status='accepted' WHERE task_id=:t AND status='pending'")
                 ->execute([':t' => $collectorTaskId]);
 
-            // 2. Reject all other pending collector tasks for the same request
+            // 2. Reject others
             $info = $pdo->prepare("SELECT request_id FROM collector_tasks WHERE task_id=:t");
             $info->execute([':t' => $collectorTaskId]);
             $rid = $info->fetchColumn();
@@ -136,8 +133,11 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
                     <td><?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></td>
                     <td><?= status_badge($r['status']) ?></td>
                     <td>
+                        <!-- CHAT BUTTON -->
+                        <a href="<?= BASE_URL ?>chat.php?donation_id=<?= (int)$r['donation_id'] ?>" class="btn btn-outline btn-sm" style="margin-bottom:4px;">💬 Chat</a>
+
                         <?php if ($r['status'] === 'pending'): ?>
-                            <form method="post" style="display:flex; gap:8px; align-items:center;">
+                            <form method="post" style="display:flex; gap:8px; align-items:center; margin-top:4px;">
                                 <?= csrf_field() ?>
                                 <input type="hidden" name="request_id" value="<?= (int)$r['request_id'] ?>">
                                 <input type="hidden" name="action" value="approve">
@@ -149,10 +149,10 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
                             </form>
                         <?php elseif ($r['status'] === 'accepted'): ?>
                             <?php if ($r['delivery_method'] === 'ngo'): ?>
-                                <a href="<?= BASE_URL ?>ngo/track-delivery.php?id=<?= (int)$r['request_id'] ?>" class="btn btn-primary btn-sm">🚚 Deliver Food</a>
+                                <a href="<?= BASE_URL ?>ngo/track-delivery.php?id=<?= (int)$r['request_id'] ?>" class="btn btn-primary btn-sm" style="margin-top:4px;">🚚 Deliver Food</a>
                             <?php else: ?>
                                 <?php if (count($collectorRequests) > 0): ?>
-                                    <table style="width:100%; font-size:12px; margin:0;">
+                                    <table style="width:100%; font-size:12px; margin:4px 0 0 0;">
                                         <?php foreach ($collectorRequests as $cr): ?>
                                             <tr>
                                                 <td style="padding:4px 0;">🚴 <?= sanitize($cr['collector_name']) ?></td>
@@ -172,7 +172,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
                                         <?php endforeach; ?>
                                     </table>
                                 <?php else: ?>
-                                    <span class="text-muted" style="font-size:12px;">Waiting for collectors...</span>
+                                    <span class="text-muted" style="font-size:12px; display:block; margin-top:4px;">Waiting for collectors...</span>
                                 <?php endif; ?>
                             <?php endif; ?>
                         <?php endif; ?>
