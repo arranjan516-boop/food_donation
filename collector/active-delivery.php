@@ -17,9 +17,9 @@ $taskId = int_get('id');
 $stmt = $pdo->prepare("
     SELECT ct.*, 
            d.donation_id, d.food_name, d.food_photo, d.unit, d.quantity AS total_qty,
-           n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area, n.city AS ngo_city, n.pincode AS ngo_pincode, n.latitude AS ngo_lat, n.longitude AS ngo_lng,
+           n.name AS ngo_name, n.phone AS ngo_phone, n.address AS ngo_address, n.area AS ngo_area, n.city AS ngo_city, n.pincode AS ngo_pincode,
            fr.recipient_id, fr.quantity AS req_qty,
-           r.name AS recipient_name, r.phone AS recipient_phone, r.address AS r_address, r.area AS r_area, r.city AS r_city, r.pincode AS r_pincode, r.latitude AS r_lat, r.longitude AS r_lng
+           r.name AS recipient_name, r.phone AS recipient_phone, r.address AS r_address, r.area AS r_area, r.city AS r_city, r.pincode AS r_pincode
     FROM collector_tasks ct
     JOIN food_donations d ON d.donation_id = ct.donation_id
     JOIN users n ON n.user_id = d.ngo_id
@@ -32,14 +32,17 @@ $t = $stmt->fetch();
 
 if (!$t) { set_flash('error', 'Task not found.'); redirect(BASE_URL . 'collector/my-tasks.php'); }
 
-// ---- SMART MAP LINK GENERATION ----
-$ngoDest = (!empty($t['ngo_lat']) && $t['ngo_lat'] != 0) ? $t['ngo_lat'].','.$t['ngo_lng'] : trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city'] . ' ' . $t['ngo_pincode']);
-$ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($ngoDest) . '&travelmode=driving';
+// ---- 100% ACCURATE MAP LINK GENERATION (TEXT ADDRESS ONLY) ----
 
-$recDest = (!empty($t['r_lat']) && $t['r_lat'] != 0) ? $t['r_lat'].','.$t['r_lng'] : trim($t['r_address'] . ', ' . $t['r_area'] . ', ' . $t['r_city'] . ' ' . $t['r_pincode']);
-$recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($recDest) . '&travelmode=driving';
+// 1. NGO Text Address
+$ngoAddress = trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city'] . ' ' . $t['ngo_pincode']);
+$ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($ngoAddress) . '&travelmode=driving';
 
-// ---------------------------------
+// 2. Recipient Text Address
+$recAddress = trim($t['r_address'] . ', ' . $t['r_area'] . ', ' . $t['r_city'] . ' ' . $t['r_pincode']);
+$recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($recAddress) . '&travelmode=driving';
+
+// -------------------------------------------------------------
 
 $errors = [];
 $statusFlow = [
@@ -114,7 +117,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="toast toast-error"><?php foreach ($errors as $e): ?><?= sanitize($e) ?><br><?php endforeach; ?></div>
 <?php endif; ?>
 
-<!-- PICKUP CARD -->
+<!-- PICKUP CARD (NGO Profile) -->
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($t['food_name']) ?></h2>
@@ -125,7 +128,8 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <div>
             <h4>🏢 Pickup From (NGO)</h4>
             <p><strong><?= sanitize($t['ngo_name']) ?></strong> (<?= sanitize($t['ngo_phone']) ?>)</p>
-            <p><?= sanitize($t['ngo_address']) ?>, <?= sanitize($t['ngo_area']) ?>, <?= sanitize($t['ngo_city']) ?> - <?= sanitize($t['ngo_pincode']) ?></p>
+            <!-- Display the exact text address used in Google Maps -->
+            <p><?= sanitize($ngoAddress) ?></p>
             
             <?php if (in_array($t['status'], ['accepted', 'pickup_started'])): ?>
                 <a href="<?= $ngoMapUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">🧭 Navigate to NGO</a>
@@ -134,12 +138,13 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 </div>
 
-<!-- DELIVERY CARD -->
+<!-- DELIVERY CARD (Recipient Profile) -->
 <?php if (in_array($t['status'], ['picked_up', 'delivering', 'awaiting_proof'])): ?>
 <div class="card mb-3" style="border-left:4px solid var(--green); background:#F1F8E9">
     <h4>🏁 Deliver To (Recipient)</h4>
     <p><strong><?= sanitize($t['recipient_name']) ?></strong> (<?= sanitize($t['recipient_phone']) ?>)</p>
-    <p><?= sanitize($t['r_address']) ?>, <?= sanitize($t['r_area']) ?>, <?= sanitize($t['r_city']) ?> - <?= sanitize($t['r_pincode']) ?></p>
+    <!-- Display the exact text address used in Google Maps -->
+    <p><?= sanitize($recAddress) ?></p>
     
     <a href="<?= $recipientMapUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">🧭 Navigate to Recipient</a>
 </div>
@@ -157,7 +162,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
-<!-- UPLOAD PROOF FORM (Only shows when status is exactly 'awaiting_proof') -->
+<!-- UPLOAD PROOF FORM -->
 <?php if ($t['status'] === 'awaiting_proof'): ?>
     <div class="card">
         <h3 class="card-title">📷 Upload Delivery Proof</h3>
