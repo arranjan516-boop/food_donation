@@ -14,6 +14,7 @@ $myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['lati
 $myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
 // Fetch food that has been collected by an NGO and has remaining inventory
+// Added the 2-hour check to hide expired food
 $sql = "
     SELECT d.*, u.name AS ngo_name, u.city AS ngo_city, u.area AS ngo_area, u.latitude AS ngo_lat, u.longitude AS ngo_lng,
            (d.collected_quantity - d.distributed_quantity) AS available_qty
@@ -22,6 +23,7 @@ $sql = "
     WHERE d.status IN ('picked_up', 'delivered', 'distributing')
       AND (d.collected_quantity - d.distributed_quantity) > 0
       AND u.is_verified = 1
+      AND (d.collected_at IS NULL OR d.collected_at > DATE_SUB(NOW(), INTERVAL 2 HOUR))
     ORDER BY d.created_at DESC
 ";
 $all = $pdo->query($sql)->fetchAll();
