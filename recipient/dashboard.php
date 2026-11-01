@@ -1,7 +1,6 @@
 <?php
 // recipient/dashboard.php
 $pageTitle = 'Recipient Dashboard';
-$extraCss = ['food-grid.css'];
 require_once __DIR__ . '/../includes/dashboard-header.php';
 require_once __DIR__ . '/../includes/location-functions.php';
 
@@ -13,11 +12,11 @@ if (current_role() !== 'recipient' && current_role() !== 'admin') {
 $uid = current_user_id();
 
 // Recipient coordinates
-$me = $pdo->prepare("SELECT * FROM users WHERE user_id = :u");
+$me = $pdo->prepare("SELECT latitude, longitude FROM users WHERE user_id = :u");
 $me->execute([':u' => $uid]);
 $me = $me->fetch();
-$myLat = $me['latitude'];
-$myLng = $me['longitude'];
+$myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['latitude']  : null;
+$myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
 // ---- Stats ----
 $stats = $pdo->prepare("
@@ -36,18 +35,31 @@ $s['accepted']       = $s['accepted']       ?? 0;
 $s['completed']      = $s['completed']      ?? 0;
 
 // ---- Available food within 15 KM ----
-$allAvailable = $pdo->query("
-    SELECT d.*, u.name AS donor_name
+$sql = "
+    SELECT d.*, u.name AS ngo_name, u.latitude AS ngo_lat, u.longitude AS ngo_lng,
+           (d.collected_quantity - d.distributed_quantity) AS available_qty
     FROM food_donations d
-    JOIN users u ON u.user_id = d.donor_id
-    WHERE d.status = 'available'
-      AND (d.best_before IS NULL OR d.best_before > NOW())
+    JOIN users u ON u.user_id = d.ngo_id
+    WHERE d.status IN ('picked_up', 'delivered', 'distributing')
+      AND (d.collected_quantity - d.distributed_quantity) > 0
+      AND u.is_verified = 1
     ORDER BY d.created_at DESC
-    LIMIT 60
-")->fetchAll();
+";
+$all = $pdo->query($sql)->fetchAll();
 
-$nearby = filter_within_km($allAvailable, $myLat, $myLng, MATCH_RADIUS_KM);
-usort($nearby, fn($a,$b) => $a['distance_km'] <=> $b['distance_km']);
+$nearby = [];
+if ($myLat !== null && $myLng !== null) {
+    foreach ($all as $d) {
+        if ($d['ngo_lat'] !== null && $d['ngo_lng'] !== null) {
+            $km = haversine_km($myLat, $myLng, (float)$d['ngo_lat'], (float)$d['ngo_lng']);
+            if ($km !== null && $km <= MATCH_RADIUS_KM) {
+                $d['distance_km'] = round($km, 2);
+                $nearby[] = $d;
+            }
+        }
+    }
+    usort($nearby, fn($a, $b) => $a['distance_km'] <=> $b['distance_km']);
+}
 $preview = array_slice($nearby, 0, 6);
 ?>
 
@@ -98,12 +110,14 @@ $preview = array_slice($nearby, 0, 6);
                         <span class="badge <?= $uCls ?>"><?= $uTxt ?></span>
                     </div>
                     <div class="food-card-meta">
-                        <span>🍽️ <?= (int)$d['people_served'] ?> meals</span>
+                        <span>🏢 <?= sanitize($d['ngo_name']) ?></span>
+                    </div>
+                    <div class="food-card-meta">
+                        <span>📦 <?= (float)$d['available_qty'] ?> <?= sanitize($d['unit']) ?></span>
                         <span>📍 <?= number_format($d['distance_km'],1) ?> KM</span>
                     </div>
                     <div class="food-card-actions">
-                        <a href="<?= BASE_URL ?>recipient/food-details.php?id=<?= (int)$d['donation_id'] ?>"
-                           class="btn btn-primary btn-sm">View Details</a>
+                        <a href="<?= BASE_URL ?>recipient/food-details.php?id=<?= (int)$d['donation_id'] ?>" class="btn btn-primary btn-sm">View Details</a>
                     </div>
                 </div>
             </div>
