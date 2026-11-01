@@ -14,7 +14,7 @@ $myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['lati
 $myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
 // Fetch food that has been collected by an NGO and has remaining inventory
-// Added the 2-hour check to hide expired food
+// Added strict check for inventory > 0 and not expired
 $sql = "
     SELECT d.*, u.name AS ngo_name, u.city AS ngo_city, u.area AS ngo_area, u.latitude AS ngo_lat, u.longitude AS ngo_lng,
            (d.collected_quantity - d.distributed_quantity) AS available_qty
