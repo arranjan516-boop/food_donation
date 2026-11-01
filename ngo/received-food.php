@@ -8,7 +8,7 @@ $uid = current_user_id();
 $stmt = $pdo->prepare("
     SELECT d.*, u.name AS donor_name,
            (d.collected_quantity - d.distributed_quantity) AS remaining_qty,
-           TIMESTAMPDIFF(MINUTE, NOW(), DATE_ADD(d.collected_at, INTERVAL 2 HOUR)) AS minutes_left
+           IF(d.collected_at IS NULL, NULL, TIMESTAMPDIFF(MINUTE, NOW(), DATE_ADD(d.collected_at, INTERVAL 2 HOUR))) AS minutes_left
     FROM food_donations d
     JOIN users u ON u.user_id = d.donor_id
     WHERE d.ngo_id = :u AND d.collected_quantity > 0
@@ -43,7 +43,7 @@ $batches = $stmt->fetchAll();
                         ? ($b['distributed_quantity'] / $b['collected_quantity']) * 100 
                         : 0;
                         
-                    $isExpired = in_array($b['status'], ['expired', 'completed', 'cancelled']);
+                    $isExpired = ($b['status'] === 'expired');
                     $isOutOfStock = $b['remaining_qty'] <= 0;
                     $isExpiringSoon = (!$isExpired && !$isOutOfStock && $b['minutes_left'] !== null && $b['minutes_left'] <= 30 && $b['minutes_left'] > 0);
                     $timeIsUp = (!$isExpired && !$isOutOfStock && $b['minutes_left'] !== null && $b['minutes_left'] <= 0);
@@ -87,6 +87,8 @@ $batches = $stmt->fetchAll();
                                 <span class="text-muted" style="font-size:12px;">
                                     ⏱️ <?= floor($b['minutes_left'] / 60) ?>h <?= $b['minutes_left'] % 60 ?>m left
                                 </span>
+                            <?php else: ?>
+                                <span class="text-muted" style="font-size:12px;">—</span>
                             <?php endif; ?>
                         <?php endif; ?>
                     </td>
