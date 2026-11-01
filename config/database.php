@@ -2,10 +2,10 @@
 // config/database.php
 require_once __DIR__ . '/constants.php';
 
-$DB_HOST = 'localhost';
-$DB_NAME = 'food_waste_donation';
-$DB_USER = 'root';
-$DB_PASS = '';           // XAMPP default = empty
+$DB_HOST = 'sql111.infinityfree.com';
+$DB_NAME = 'if0_4332694_food_waste_donation';
+$DB_USER = 'if0_43326944';
+$DB_PASS = 'nWQMwwdlWGkQ2';           // XAMPP default = empty
 $DB_CHAR = 'utf8mb4';
 
 try {
