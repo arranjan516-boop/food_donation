@@ -32,13 +32,9 @@ $t = $stmt->fetch();
 
 if (!$t) { set_flash('error', 'Task not found.'); redirect(BASE_URL . 'collector/my-tasks.php'); }
 
-// ---- 100% ACCURATE MAP LINK GENERATION (TEXT ADDRESS ONLY) ----
-$ngoAddress = trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city'] . ' ' . $t['ngo_pincode']);
-$ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($ngoAddress) . '&travelmode=driving';
-
-$recAddress = trim($t['r_address'] . ', ' . $t['r_area'] . ', ' . $t['r_city'] . ' ' . $t['r_pincode']);
-$recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($recAddress) . '&travelmode=driving';
-// -------------------------------------------------------------
+// Prepare text addresses for display
+$ngoFullAddress = trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city'] . ' - ' . $t['ngo_pincode']);
+$recFullAddress = trim($t['r_address'] . ', ' . $t['r_area'] . ', ' . $t['r_city'] . ' - ' . $t['r_pincode']);
 
 $errors = [];
 $statusFlow = [
@@ -124,11 +120,8 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <div>
             <h4>🏢 Pickup From (NGO)</h4>
             <p><strong><?= sanitize($t['ngo_name']) ?></strong> (<?= sanitize($t['ngo_phone']) ?>)</p>
-            <p><?= sanitize($ngoAddress) ?></p>
-            
-            <?php if (in_array($t['status'], ['accepted', 'pickup_started'])): ?>
-                <a href="<?= $ngoMapUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">🧭 Navigate to NGO</a>
-            <?php endif; ?>
+            <!-- Text Address Only -->
+            <p style="font-size: 15px; color: var(--gray-700);"><?= sanitize($ngoFullAddress) ?></p>
         </div>
     </div>
 </div>
@@ -138,9 +131,8 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <div class="card mb-3" style="border-left:4px solid var(--green); background:#F1F8E9">
     <h4>🏁 Deliver To (Recipient)</h4>
     <p><strong><?= sanitize($t['recipient_name']) ?></strong> (<?= sanitize($t['recipient_phone']) ?>)</p>
-    <p><?= sanitize($recAddress) ?></p>
-    
-    <a href="<?= $recipientMapUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">🧭 Navigate to Recipient</a>
+    <!-- Text Address Only -->
+    <p style="font-size: 15px; color: var(--green-dark); font-weight: 500;"><?= sanitize($recFullAddress) ?></p>
 </div>
 <?php endif; ?>
 
@@ -156,7 +148,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
-<!-- UPLOAD PROOF FORM (Shows if delivering or awaiting_proof) -->
+<!-- UPLOAD PROOF FORM -->
 <?php if (in_array($t['status'], ['delivering', 'awaiting_proof'])): ?>
     <div class="card">
         <h3 class="card-title">📷 Upload Delivery Proof</h3>
