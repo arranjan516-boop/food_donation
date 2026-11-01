@@ -8,7 +8,6 @@ require_login();
 $uid = current_user_id();
 $rid = int_get('id');
 
-// 1. Fetch Request & Donation Details
 $stmt = $pdo->prepare("
     SELECT fr.*, d.donation_id, d.food_name, d.food_photo, d.unit, d.donor_id, d.ngo_id, d.status AS donation_status,
            u.name AS donor_name, n.name AS ngo_name
@@ -27,23 +26,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post('action');
 
-    // Handle Rating Submission
     if ($action === 'submit_rating') {
         $rating = (int)post('rating');
         $review = post('review');
-
         if ($rating >= 1 && $rating <= 5) {
             $pdo->prepare("INSERT INTO ngo_ratings (ngo_id, recipient_id, request_id, rating, review) 
                            VALUES (:n, :r, :req, :stars, :review)")
                 ->execute([':n' => $r['ngo_id'], ':r' => $uid, ':req' => $rid, ':stars' => $rating, ':review' => $review]);
-            
             notify($pdo, (int)$r['ngo_id'], '⭐ New Review', 'A recipient left you a ' . $rating . '-star rating.', 'rating', $rid);
             set_flash('success', 'Thank you for rating!');
             redirect(BASE_URL . 'recipient/request-details.php?id=' . $rid);
         }
     }
 
-    // Handle Confirm Receipt
     if ($action === 'confirm_receipt') {
         $pdo->beginTransaction();
         try {
@@ -64,12 +59,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// 2. Fetch Delivery Proof
 $pf = $pdo->prepare("SELECT dp.*, u.name AS uploader_name FROM delivery_proofs dp JOIN users u ON u.user_id = dp.uploaded_by WHERE dp.request_id = :r ORDER BY uploaded_at DESC LIMIT 1");
 $pf->execute([':r' => $rid]);
 $proof = $pf->fetch();
 
-// 3. Check if I already rated this NGO
 $myRating = $pdo->prepare("SELECT * FROM ngo_ratings WHERE request_id = :r AND recipient_id = :u LIMIT 1");
 $myRating->execute([':r' => $rid, ':u' => $uid]);
 $myRating = $myRating->fetch();
@@ -81,14 +74,13 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($r['food_name']) ?></h2>
-        <?= status_badge($r['status']) ?>
+        <?= status_badge($r['donation_status']) ?>
     </div>
     <div class="details-grid">
         <img src="<?= food_photo_url($r['food_photo']) ?>" alt="">
         <div>
             <p><strong>NGO:</strong> <?= sanitize($r['ngo_name'] ?: '—') ?></p>
             <p><strong>Requested qty:</strong> <?= (float)$r['quantity'] ?> <?= sanitize($r['unit']) ?></p>
-            <p><strong>Delivery Method:</strong> <?= ucfirst($r['delivery_method']) ?></p>
         </div>
     </div>
 </div>
@@ -99,15 +91,16 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 
 <?php if ($proof): ?>
     <div class="card mb-3">
-        <h3 class="card-title">🍱 Delivery Proof</h3>
+        <h3 class="card-title">📷 Delivery Proof</h3>
         <img src="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>" style="max-width:280px;border-radius:12px;margin:10px 0" alt="">
+        <p class="text-muted">Uploaded by <?= sanitize($proof['uploader_name']) ?></p>
     </div>
 <?php endif; ?>
 
-<!-- ACTION BUTTONS -->
-<?php if ($r['status'] === 'accepted' || ($r['donation_status'] === 'delivered' && $r['status'] !== 'completed')): ?>
+<!-- THE FIX: Show Confirm Button if status is NOT completed, regardless of 'accepted' status -->
+<?php if ($r['donation_status'] !== 'completed'): ?>
     <div class="card mb-3">
-        <h3 class="card-title">Actions</h3>
+        <h3 class="card-title">Confirm Receipt</h3>
         <form method="post">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="confirm_receipt">
@@ -117,7 +110,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <?php endif; ?>
 
 <!-- RATING SECTION -->
-<?php if ($r['status'] === 'completed'): ?>
+<?php if ($r['donation_status'] === 'completed'): ?>
     <div class="card mb-3">
         <h3 class="card-title">Rate the NGO</h3>
         
