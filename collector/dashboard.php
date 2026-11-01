@@ -35,31 +35,32 @@ $me = $me->fetch();
 $myLat = $me['latitude']  !== null && $me['latitude']  !== '' ? (float)$me['latitude']  : null;
 $myLng = $me['longitude'] !== null && $me['longitude'] !== '' ? (float)$me['longitude'] : null;
 
-// Nearby tasks
+// Nearby tasks (approved by NGO, waiting for collector request)
 $taskSql = "
-    SELECT d.*, u.name AS donor_name,
-           (SELECT COUNT(*) FROM collector_tasks ct
-              WHERE ct.donation_id = d.donation_id
-                AND ct.status IN ('accepted','pickup_started','picked_up','delivering','completed')) AS taken
-    FROM food_donations d
-    JOIN users u ON u.user_id = d.donor_id
-    WHERE d.status IN ('accepted')
-      AND d.delivery_preference IN ('collector','any')
-      AND (d.best_before IS NULL OR d.best_before > NOW())
-    ORDER BY d.created_at DESC
-    LIMIT 200
+    SELECT fr.request_id, fr.quantity AS req_qty, fr.delivery_method, 
+           d.donation_id, d.food_name, d.food_photo, d.unit, d.area AS ngo_area, d.city AS ngo_city, d.latitude AS ngo_lat, d.longitude AS ngo_lng,
+           n.name AS ngo_name,
+           r.name AS recipient_name
+    FROM food_requests fr
+    JOIN food_donations d ON d.donation_id = fr.donation_id
+    JOIN users n ON n.user_id = d.ngo_id
+    JOIN users r ON r.user_id = fr.recipient_id
+    WHERE fr.delivery_method = 'collector'
+      AND fr.status = 'accepted'
+      AND d.status IN ('picked_up', 'delivered', 'distributing')
+      AND NOT EXISTS (
+          SELECT 1 FROM collector_tasks ct WHERE ct.request_id = fr.request_id AND ct.status IN ('accepted','pickup_started','picked_up','delivering','delivered','completed')
+      )
+    ORDER BY fr.accepted_at DESC LIMIT 30
 ";
 $candidates = $pdo->query($taskSql)->fetchAll();
 
 $nearby = [];
 if ($myLat !== null && $myLng !== null) {
     foreach ($candidates as $t) {
-        if ((int)$t['taken'] > 0) continue;
-        if ($t['latitude'] === null || $t['longitude'] === null) continue;
-
-        $km = haversine_km($myLat, $myLng, (float)$t['latitude'], (float)$t['longitude']);
+        if ($t['ngo_lat'] === null || $t['ngo_lng'] === null) continue;
+        $km = haversine_km($myLat, $myLng, (float)$t['ngo_lat'], (float)$t['ngo_lng']);
         if ($km === null || $km > MATCH_RADIUS_KM) continue;
-
         $t['distance_km'] = round($km, 2);
         $nearby[] = $t;
     }
@@ -69,12 +70,12 @@ $preview = array_slice($nearby, 0, 4);
 
 // My active tasks
 $active = $pdo->prepare("
-    SELECT ct.*, d.food_name, d.food_photo, d.city, d.area, u.name AS donor_name
+    SELECT ct.*, d.food_name, d.food_photo, d.city, d.area, n.name AS ngo_name
     FROM collector_tasks ct
     JOIN food_donations d ON d.donation_id = ct.donation_id
-    JOIN users u ON u.user_id = d.donor_id
+    JOIN users n ON n.user_id = d.ngo_id
     WHERE ct.collector_id = :u
-      AND ct.status IN ('accepted','pickup_started','picked_up','delivering')
+      AND ct.status IN ('accepted','pickup_started','picked_up','delivering','awaiting_proof')
     ORDER BY ct.assigned_at DESC
 ");
 $active->execute([':u' => $uid]);
@@ -92,28 +93,27 @@ $activeTasks = $active->fetchAll();
         <div><div class="stat-value"><?= (int)$s['completed_tasks'] ?></div><div class="stat-label">Completed</div></div></div>
 </div>
 
-<?php if ($myLat === null || $myLng === null): ?>
-    <div class="toast toast-info mb-2">
-        📍 Set your <a href="<?= BASE_URL ?>collector/edit-profile.php">location</a>
-        to see pickup tasks within <?= MATCH_RADIUS_KM ?> KM.
-    </div>
-<?php endif; ?>
-
 <div class="flex-between mb-2">
-    <h3>Nearby Pickup Tasks <span class="text-muted" style="font-size:14px">(within <?= MATCH_RADIUS_KM ?> KM)</span></h3>
+    <h3>Available Delivery Tasks <span class="text-muted" style="font-size:14px">(within <?= MATCH_RADIUS_KM ?> KM)</span></h3>
     <a href="<?= BASE_URL ?>collector/available-tasks.php" class="btn btn-outline btn-sm">View All</a>
 </div>
+
+<?php if ($myLat === null || $myLng === null): ?>
+    <div class="toast toast-info mb-2">
+        📍 Set your <a href="<?= BASE_URL ?>collector/edit-profile.php">location</a> to see nearby tasks.
+    </div>
+<?php endif; ?>
 
 <?php if (!$preview): ?>
     <div class="empty-state">
         <div class="empty-icon">🚴</div>
-        <h3>No pickup tasks nearby</h3>
-        <p>New tasks will appear here automatically once donors accept a recipient.</p>
+        <h3>No delivery tasks nearby</h3>
+        <p>New tasks appear when NGOs need a collector.</p>
     </div>
 <?php else: ?>
     <div class="table-card mb-3">
         <table class="table">
-            <thead><tr><th>Food</th><th>Donor</th><th>Pickup</th><th>Distance</th><th>Urgency</th><th></th></tr></thead>
+            <thead><tr><th>Food</th><th>NGO (Pickup)</th><th>Recipient (Drop)</th><th>Distance</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($preview as $t): ?>
                 <tr>
@@ -121,32 +121,14 @@ $activeTasks = $active->fetchAll();
                         <img class="thumb" src="<?= food_photo_url($t['food_photo']) ?>" alt="">
                         <div>
                             <strong><?= sanitize($t['food_name']) ?></strong><br>
-                            <small class="text-muted"><?= (int)$t['people_served'] ?> meals · <?= sanitize($t['food_type']) ?></small>
+                            <small class="text-muted"><?= (float)$t['req_qty'] ?> <?= sanitize($t['unit']) ?></small>
                         </div>
                     </td>
-                    <td><?= sanitize($t['donor_name']) ?></td>
-                    <td><?= sanitize($t['area'] ?: $t['city']) ?></td>
+                    <td>🏢 <?= sanitize($t['ngo_name']) ?></td>
+                    <td>🙋 <?= sanitize($t['recipient_name']) ?></td>
+                    <td><span class="badge badge-blue">📍 <?= number_format($t['distance_km'],1) ?> KM</span></td>
                     <td>
-                        <?php if (isset($t['distance_km'])): ?>
-                            <span class="badge badge-blue">
-                                📍 <?= $t['distance_km'] < 0.1
-                                    ? 'Same location'
-                                    : number_format($t['distance_km'], 1) . ' KM' ?>
-                            </span>
-                        <?php else: ?>
-                            <span class="badge badge-gray">—</span>
-                        <?php endif; ?>
-                    </td>
-                    <td>
-                        <?php
-                            $uCls = in_array($t['urgency'], ['urgent','very_urgent']) ? 'badge-red' : 'badge-yellow';
-                            $uTxt = ucfirst(str_replace('_',' ',$t['urgency']));
-                        ?>
-                        <span class="badge <?= $uCls ?>"><?= $uTxt ?></span>
-                    </td>
-                    <td>
-                        <a href="<?= BASE_URL ?>collector/task-details.php?id=<?= (int)$t['donation_id'] ?>"
-                           class="btn btn-primary btn-sm">Open</a>
+                        <a href="<?= BASE_URL ?>collector/task-details.php?id=<?= (int)$t['donation_id'] ?>&request_id=<?= (int)$t['request_id'] ?>" class="btn btn-primary btn-sm">Request</a>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -161,12 +143,12 @@ $activeTasks = $active->fetchAll();
         <div style="padding:40px;text-align:center"><p class="text-muted">No active deliveries.</p></div>
     <?php else: ?>
         <table class="table">
-            <thead><tr><th>Food</th><th>Donor</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Food</th><th>NGO</th><th>Status</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($activeTasks as $t): ?>
                 <tr>
                     <td><?= sanitize($t['food_name']) ?></td>
-                    <td><?= sanitize($t['donor_name']) ?></td>
+                    <td><?= sanitize($t['ngo_name']) ?></td>
                     <td><?= status_badge($t['status']) ?></td>
                     <td><a href="<?= BASE_URL ?>collector/active-delivery.php?id=<?= (int)$t['task_id'] ?>" class="btn btn-primary btn-sm">Continue</a></td>
                 </tr>
