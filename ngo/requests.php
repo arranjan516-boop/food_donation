@@ -16,7 +16,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = post('action');
     $reqId = int_post('request_id');
+    $collectorTaskId = int_post('collector_task_id');
 
+    // Approve Recipient Request
     if ($action === 'approve') {
         $deliveryMethod = post('delivery_method');
         try {
@@ -42,15 +44,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
             notify($pdo, (int)$req['recipient_id'], '✅ Request Approved', 'Your food request has been approved.', 'request_accepted', $req['donation_id']);
             set_flash('success', 'Request approved!');
+        } catch (Exception $ex) { $pdo->rollBack(); set_flash('error', $ex->getMessage()); }
+        redirect(BASE_URL . 'ngo/requests.php');
+    }
 
-        } catch (Exception $ex) {
-            $pdo->rollBack();
-            set_flash('error', $ex->getMessage());
-        }
+    // Approve Collector Request
+    if ($action === 'approve_collector') {
+        try {
+            $pdo->beginTransaction();
+            // 1. Approve this collector task
+            $pdo->prepare("UPDATE collector_tasks SET status='accepted' WHERE task_id=:t AND status='pending'")
+                ->execute([':t' => $collectorTaskId]);
+
+            // 2. Reject all other pending collector tasks for the same request
+            $info = $pdo->prepare("SELECT request_id FROM collector_tasks WHERE task_id=:t");
+            $info->execute([':t' => $collectorTaskId]);
+            $rid = $info->fetchColumn();
+
+            $pdo->prepare("UPDATE collector_tasks SET status='rejected' WHERE request_id=:r AND task_id <> :t AND status='pending'")
+                ->execute([':r' => $rid, ':t' => $collectorTaskId]);
+
+            $pdo->commit();
+
+            // Notify Collector
+            $colId = $pdo->prepare("SELECT collector_id FROM collector_tasks WHERE task_id=:t");
+            $colId->execute([':t' => $collectorTaskId]);
+            $collectorUserId = $colId->fetchColumn();
+            
+            notify($pdo, (int)$collectorUserId, '✅ Task Approved', 'The NGO approved you to deliver the food. Navigate to the NGO now.', 'collector', $rid);
+            set_flash('success', 'Collector approved!');
+        } catch (Exception $ex) { $pdo->rollBack(); set_flash('error', $ex->getMessage()); }
         redirect(BASE_URL . 'ngo/requests.php');
     }
 }
 
+// Fetch all requests
 $stmt = $pdo->prepare("
     SELECT fr.*, d.food_name, d.unit, u.name AS recipient_name
     FROM food_requests fr
@@ -75,11 +103,16 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
             <thead><tr><th>Recipient</th><th>Food</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead>
             <tbody>
             <?php foreach ($requests as $r): ?>
-                <?php 
-                // Check for delivery proof
-                $pf = $pdo->prepare("SELECT proof_image FROM delivery_proofs WHERE request_id = :rid LIMIT 1");
-                $pf->execute([':rid' => $r['request_id']]);
-                $proof = $pf->fetch();
+                <?php
+                // Fetch collector requests for this specific task
+                $colReq = $pdo->prepare("
+                    SELECT ct.task_id, ct.status AS task_status, u.name AS collector_name 
+                    FROM collector_tasks ct 
+                    JOIN users u ON u.user_id = ct.collector_id 
+                    WHERE ct.request_id = :r AND ct.status IN ('pending','accepted','pickup_started','picked_up','delivering','delivered','completed')
+                ");
+                $colReq->execute([':r' => $r['request_id']]);
+                $collectorRequests = $colReq->fetchAll();
                 ?>
                 <tr>
                     <td><strong><?= sanitize($r['recipient_name']) ?></strong></td>
@@ -99,17 +132,33 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
                                 <button class="btn btn-primary btn-sm" data-confirm="Approve?">✅ Approve</button>
                             </form>
                         <?php elseif ($r['status'] === 'accepted'): ?>
-                            <a href="<?= BASE_URL ?>chat.php?donation_id=<?= (int)$r['donation_id'] ?>" class="btn btn-outline btn-sm">💬 Chat</a>
-                            
                             <?php if ($r['delivery_method'] === 'ngo'): ?>
-                                <a href="<?= BASE_URL ?>ngo/track-delivery.php?id=<?= (int)$r['request_id'] ?>" class="btn btn-primary btn-sm" style="margin-left:6px;">🚚 Deliver Food</a>
+                                <a href="<?= BASE_URL ?>ngo/track-delivery.php?id=<?= (int)$r['request_id'] ?>" class="btn btn-primary btn-sm">🚚 Deliver Food</a>
                             <?php else: ?>
-                                <span class="badge badge-yellow" style="margin-left:6px;">Waiting for Collector</span>
+                                <?php if (count($collectorRequests) > 0): ?>
+                                    <table style="width:100%; font-size:12px; margin:0;">
+                                        <?php foreach ($collectorRequests as $cr): ?>
+                                            <tr>
+                                                <td style="padding:4px 0;">🚴 <?= sanitize($cr['collector_name']) ?></td>
+                                                <td>
+                                                    <?php if ($cr['task_status'] === 'pending'): ?>
+                                                        <form method="post" style="display:inline;">
+                                                            <?= csrf_field() ?>
+                                                            <input type="hidden" name="action" value="approve_collector">
+                                                            <input type="hidden" name="collector_task_id" value="<?= (int)$cr['task_id'] ?>">
+                                                            <button class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:11px;">Approve</button>
+                                                        </form>
+                                                    <?php else: ?>
+                                                        <?= status_badge($cr['task_status']) ?>
+                                                    <?php endif; ?>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </table>
+                                <?php else: ?>
+                                    <span class="text-muted" style="font-size:12px;">Waiting for collectors to request...</span>
+                                <?php endif; ?>
                             <?php endif; ?>
-                        <?php endif; ?>
-
-                        <?php if ($proof): ?>
-                            <a href="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>" target="_blank" class="btn btn-outline btn-sm" style="margin-left:6px;">📷 View Proof</a>
                         <?php endif; ?>
                     </td>
                 </tr>
