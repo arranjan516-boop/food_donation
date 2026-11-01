@@ -42,14 +42,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
+            // 1. LOCK THE ROW
+            // This prevents other recipients from requesting at the exact same millisecond
             $lock = $pdo->prepare("SELECT (collected_quantity - distributed_quantity) AS live_qty FROM food_donations WHERE donation_id = :d FOR UPDATE");
             $lock->execute([':d' => $donationId]);
             $live = $lock->fetch();
 
+            // 2. CHECK INVENTORY
             if ($qty > (float)$live['live_qty']) {
-                throw new Exception('Quantity exceeds remaining available inventory.');
+                throw new Exception('Quantity exceeds remaining available inventory. Someone else may have just requested it.');
             }
 
+            // 3. INSERT REQUEST (Status: Pending)
             $ins = $pdo->prepare("
                 INSERT INTO food_requests
                   (donation_id, recipient_id, quantity, message, delivery_preference, contact_number, delivery_address, status)
@@ -61,6 +65,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':m' => $message, ':c' => $contact, ':a' => $address,
             ]);
             $requestId = (int)$pdo->lastInsertId();
+
+            // Note: We do NOT deduct from distributed_quantity yet! 
+            // We wait for the NGO to approve the request in ngo/requests.php.
 
             $pdo->commit();
 
