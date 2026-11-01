@@ -33,15 +33,11 @@ $t = $stmt->fetch();
 if (!$t) { set_flash('error', 'Task not found.'); redirect(BASE_URL . 'collector/my-tasks.php'); }
 
 // ---- 100% ACCURATE MAP LINK GENERATION (TEXT ADDRESS ONLY) ----
-
-// 1. NGO Text Address
 $ngoAddress = trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city'] . ' ' . $t['ngo_pincode']);
 $ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($ngoAddress) . '&travelmode=driving';
 
-// 2. Recipient Text Address
 $recAddress = trim($t['r_address'] . ', ' . $t['r_area'] . ', ' . $t['r_city'] . ' ' . $t['r_pincode']);
 $recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($recAddress) . '&travelmode=driving';
-
 // -------------------------------------------------------------
 
 $errors = [];
@@ -128,7 +124,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <div>
             <h4>🏢 Pickup From (NGO)</h4>
             <p><strong><?= sanitize($t['ngo_name']) ?></strong> (<?= sanitize($t['ngo_phone']) ?>)</p>
-            <!-- Display the exact text address used in Google Maps -->
             <p><?= sanitize($ngoAddress) ?></p>
             
             <?php if (in_array($t['status'], ['accepted', 'pickup_started'])): ?>
@@ -143,7 +138,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <div class="card mb-3" style="border-left:4px solid var(--green); background:#F1F8E9">
     <h4>🏁 Deliver To (Recipient)</h4>
     <p><strong><?= sanitize($t['recipient_name']) ?></strong> (<?= sanitize($t['recipient_phone']) ?>)</p>
-    <!-- Display the exact text address used in Google Maps -->
     <p><?= sanitize($recAddress) ?></p>
     
     <a href="<?= $recipientMapUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">🧭 Navigate to Recipient</a>
@@ -162,8 +156,8 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
-<!-- UPLOAD PROOF FORM -->
-<?php if ($t['status'] === 'awaiting_proof'): ?>
+<!-- UPLOAD PROOF FORM (Shows if delivering or awaiting_proof) -->
+<?php if (in_array($t['status'], ['delivering', 'awaiting_proof'])): ?>
     <div class="card">
         <h3 class="card-title">📷 Upload Delivery Proof</h3>
         <form method="post" enctype="multipart/form-data">
