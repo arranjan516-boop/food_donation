@@ -23,6 +23,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $deliveryMethod = post('delivery_method');
         try {
             $pdo->beginTransaction();
+            
+            // 1. Lock the row to prevent race conditions
             $stmt = $pdo->prepare("
                 SELECT fr.*, d.donation_id, d.ngo_id, d.unit, (d.collected_quantity - d.distributed_quantity) AS live_qty
                 FROM food_requests fr
@@ -35,16 +37,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$req) throw new Exception('Request not found.');
             if ($req['quantity'] > $req['live_qty']) throw new Exception('Not enough inventory.');
 
+            // 2. Update the request to 'accepted'
             $pdo->prepare("UPDATE food_requests SET status='accepted', accepted_at=NOW(), delivery_method=:m WHERE request_id=:r")
                 ->execute([':m' => $deliveryMethod, ':r' => $reqId]);
             
+            // 3. Deduct from Inventory (distributed_quantity goes up)
             $pdo->prepare("UPDATE food_donations SET distributed_quantity = distributed_quantity + :q WHERE donation_id=:d")
                 ->execute([':q' => $req['quantity'], ':d' => $req['donation_id']]);
 
+            // Note: We DO NOT change the donation status here. It remains 'picked_up' or 'delivered'
+            // so the remaining quantity is still visible to other recipients.
+
             $pdo->commit();
+
             notify($pdo, (int)$req['recipient_id'], '✅ Request Approved', 'Your food request has been approved.', 'request_accepted', $req['donation_id']);
-            set_flash('success', 'Request approved!');
-        } catch (Exception $ex) { $pdo->rollBack(); set_flash('error', $ex->getMessage()); }
+            set_flash('success', 'Request approved! Remaining inventory updated.');
+
+        } catch (Exception $ex) { 
+            $pdo->rollBack(); 
+            set_flash('error', $ex->getMessage()); 
+        }
         redirect(BASE_URL . 'ngo/requests.php');
     }
 
@@ -71,9 +83,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $colId->execute([':t' => $collectorTaskId]);
             $collectorUserId = $colId->fetchColumn();
             
-            notify($pdo, (int)$collectorUserId, '✅ Task Approved', 'The NGO approved you to deliver the food. Navigate to the NGO now.', 'collector', $rid);
+            notify($pdo, (int)$collectorUserId, '✅ Task Approved', 'The NGO approved you to deliver the food.', 'collector', $rid);
             set_flash('success', 'Collector approved!');
-        } catch (Exception $ex) { $pdo->rollBack(); set_flash('error', $ex->getMessage()); }
+
+        } catch (Exception $ex) { 
+            $pdo->rollBack(); 
+            set_flash('error', $ex->getMessage()); 
+        }
         redirect(BASE_URL . 'ngo/requests.php');
     }
 }
@@ -156,7 +172,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
                                         <?php endforeach; ?>
                                     </table>
                                 <?php else: ?>
-                                    <span class="text-muted" style="font-size:12px;">Waiting for collectors to request...</span>
+                                    <span class="text-muted" style="font-size:12px;">Waiting for collectors...</span>
                                 <?php endif; ?>
                             <?php endif; ?>
                         <?php endif; ?>
