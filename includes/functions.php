@@ -133,21 +133,27 @@ function render_timeline($currentStatus) {
 /* =====================  EXPIRY LOGIC  ===================== */
 function auto_expire_ngo_inventory($pdo) {
     try {
+        // Find donations collected more than 2 hours ago that still have remaining inventory
         $stmt = $pdo->query("
             SELECT donation_id, collected_quantity, distributed_quantity 
             FROM food_donations 
             WHERE collected_at IS NOT NULL 
               AND collected_at < DATE_SUB(NOW(), INTERVAL 2 HOUR)
-              AND status IN ('picked_up', 'distributing', 'delivered')
+              AND status IN ('picked_up', 'delivered', 'distributing')
         ");
         $expired = $stmt->fetchAll();
+
         foreach ($expired as $row) {
             $remaining = $row['collected_quantity'] - $row['distributed_quantity'];
             if ($remaining > 0) {
-                $pdo->prepare("UPDATE food_donations SET status='expired' WHERE donation_id=:d")->execute([':d' => $row['donation_id']]);
+                // Mark the donation as expired to hide from recipients
+                $pdo->prepare("UPDATE food_donations SET status='expired' WHERE donation_id=:d")
+                    ->execute([':d' => $row['donation_id']]);
             }
         }
-    } catch (Exception $e) { /* silent */ }
+    } catch (Exception $e) {
+        // Silent fail
+    }
 }
 
 /* =====================  VERIFIED BADGE  ===================== */
