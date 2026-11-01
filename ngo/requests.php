@@ -56,7 +56,7 @@ $stmt = $pdo->prepare("
     FROM food_requests fr
     JOIN food_donations d ON d.donation_id = fr.donation_id
     JOIN users u ON u.user_id = fr.recipient_id
-    WHERE d.ngo_id = :u AND fr.status IN ('pending', 'accepted')
+    WHERE d.ngo_id = :u AND fr.status IN ('pending', 'accepted', 'completed')
     ORDER BY fr.requested_at DESC
 ");
 $stmt->execute([':u' => $uid]);
@@ -75,6 +75,12 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
             <thead><tr><th>Recipient</th><th>Food</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead>
             <tbody>
             <?php foreach ($requests as $r): ?>
+                <?php 
+                // Check for delivery proof
+                $pf = $pdo->prepare("SELECT proof_image FROM delivery_proofs WHERE request_id = :rid LIMIT 1");
+                $pf->execute([':rid' => $r['request_id']]);
+                $proof = $pf->fetch();
+                ?>
                 <tr>
                     <td><strong><?= sanitize($r['recipient_name']) ?></strong></td>
                     <td><?= sanitize($r['food_name']) ?></td>
@@ -100,6 +106,10 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
                             <?php else: ?>
                                 <span class="badge badge-yellow" style="margin-left:6px;">Waiting for Collector</span>
                             <?php endif; ?>
+                        <?php endif; ?>
+
+                        <?php if ($proof): ?>
+                            <a href="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>" target="_blank" class="btn btn-outline btn-sm" style="margin-left:6px;">📷 View Proof</a>
                         <?php endif; ?>
                     </td>
                 </tr>
