@@ -33,7 +33,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("INSERT INTO ngo_ratings (ngo_id, recipient_id, request_id, rating, review) 
                            VALUES (:n, :r, :req, :stars, :review)")
                 ->execute([':n' => $r['ngo_id'], ':r' => $uid, ':req' => $rid, ':stars' => $rating, ':review' => $review]);
-            notify($pdo, (int)$r['ngo_id'], '⭐ New Review', 'A recipient left you a ' . $rating . '-star rating.', 'rating', $rid);
             set_flash('success', 'Thank you for rating!');
             redirect(BASE_URL . 'recipient/request-details.php?id=' . $rid);
         }
@@ -44,16 +43,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->prepare("UPDATE food_requests SET status='completed' WHERE request_id=:r")->execute([':r' => $rid]);
             $pdo->prepare("UPDATE food_donations SET status='completed' WHERE donation_id=:d")->execute([':d' => $r['donation_id']]);
-            
-            $pdo->prepare("INSERT INTO donation_history (donation_id, old_status, new_status, changed_by) VALUES (:d, :old, 'completed', :u)")
-                ->execute([':d' => $r['donation_id'], ':old' => $r['donation_status'], ':u' => $uid]);
-
             $pdo->commit();
-            
-            if ($r['ngo_id']) notify($pdo, (int)$r['ngo_id'], '✅ Confirmed', 'Recipient confirmed receipt.', 'completed', $r['donation_id']);
-            notify($pdo, (int)$r['donor_id'], '✅ Completed', 'Your donated food was successfully received.', 'completed', $r['donation_id']);
-
-            set_flash('success', 'Thank you for confirming! Donation completed.');
+            set_flash('success', 'Thank you for confirming!');
             redirect(BASE_URL . 'recipient/request-details.php?id=' . $rid);
         } catch (Exception $ex) { $pdo->rollBack(); set_flash('error', $ex->getMessage()); }
     }
@@ -74,7 +65,11 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($r['food_name']) ?></h2>
-        <?= status_badge($r['donation_status']) ?>
+        <div class="flex gap-2" style="align-items:center;">
+            <?= status_badge($r['status']) ?>
+            <!-- CHAT BUTTON (After Request) -->
+            <a href="<?= BASE_URL ?>chat.php?donation_id=<?= (int)$r['donation_id'] ?>" class="btn btn-primary btn-sm">💬 Chat with NGO</a>
+        </div>
     </div>
     <div class="details-grid">
         <img src="<?= food_photo_url($r['food_photo']) ?>" alt="">
@@ -92,44 +87,34 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <?php if ($proof): ?>
     <div class="card mb-3">
         <h3 class="card-title">📷 Delivery Proof</h3>
-        <img src="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>" style="max-width:280px;border-radius:12px;margin:10px 0" alt="">
-        <p class="text-muted">Uploaded by <?= sanitize($proof['uploader_name']) ?></p>
+        <img src="<?= PROOF_UPLOAD_URL . rawurlencode($proof['proof_image']) ?>" style="max-width:280px;border-radius:12px;" alt="">
     </div>
 <?php endif; ?>
 
-<!-- THE FIX: Show Confirm Button if status is NOT completed, regardless of 'accepted' status -->
 <?php if ($r['donation_status'] !== 'completed'): ?>
     <div class="card mb-3">
         <h3 class="card-title">Confirm Receipt</h3>
         <form method="post">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="confirm_receipt">
-            <button class="btn btn-primary btn-lg" data-confirm="Confirm you have received the food?">✅ Confirm Food Received</button>
+            <button class="btn btn-primary btn-lg">✅ Confirm Food Received</button>
         </form>
     </div>
 <?php endif; ?>
 
-<!-- RATING SECTION -->
 <?php if ($r['donation_status'] === 'completed'): ?>
     <div class="card mb-3">
         <h3 class="card-title">Rate the NGO</h3>
-        
         <?php if ($myRating): ?>
             <div class="toast toast-success">
-                ⭐ You rated this NGO 
-                <strong><?= str_repeat('★', $myRating['rating']) . str_repeat('☆', 5 - $myRating['rating']) ?></strong>
+                ⭐ You rated this NGO <strong><?= str_repeat('★', $myRating['rating']) ?></strong>
             </div>
-            <?php if ($myRating['review']): ?>
-                <p style="margin-top:10px; font-style:italic;">"<?= sanitize($myRating['review']) ?>"</p>
-            <?php endif; ?>
         <?php else: ?>
             <form method="post">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="submit_rating">
-                
                 <div class="form-group">
-                    <label class="form-label">How was your experience with <?= sanitize($r['ngo_name']) ?>?</label>
-                    <div style="display:flex; gap:8px; font-size:28px; cursor:pointer;" id="star-rating">
+                    <div style="display:flex; gap:8px; font-size:28px;">
                         <?php for ($i = 1; $i <= 5; $i++): ?>
                             <label style="cursor:pointer;">
                                 <input type="radio" name="rating" value="<?= $i ?>" <?= $i === 5 ? 'checked' : '' ?> required style="display:none;">
@@ -138,12 +123,9 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
                         <?php endfor; ?>
                     </div>
                 </div>
-
                 <div class="form-group">
-                    <label class="form-label">Review (Optional)</label>
-                    <textarea name="review" class="form-control" rows="2" placeholder="e.g. Great food and very polite volunteers!"></textarea>
+                    <textarea name="review" class="form-control" rows="2" placeholder="Review (optional)"></textarea>
                 </div>
-
                 <button class="btn btn-primary">Submit Rating</button>
             </form>
         <?php endif; ?>
@@ -151,7 +133,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <?php endif; ?>
 
 <script>
-// Star hover/click script
 document.querySelectorAll('.star').forEach(star => {
     star.addEventListener('mouseover', function() { updateStars(parseInt(this.dataset.value)); });
     star.addEventListener('mouseout', function() { 
@@ -164,7 +145,6 @@ document.querySelectorAll('.star').forEach(star => {
         updateStars(val);
     });
 });
-
 function updateStars(value) {
     document.querySelectorAll('.star').forEach(s => {
         s.style.color = parseInt(s.dataset.value) <= value ? '#FFD700' : '#ccc';
