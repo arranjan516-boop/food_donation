@@ -32,24 +32,11 @@ $t = $stmt->fetch();
 
 if (!$t) { set_flash('error', 'Task not found.'); redirect(BASE_URL . 'collector/my-tasks.php'); }
 
-// ---- SMART MAP LINK GENERATION (NGO & RECIPIENT PROFILES) ----
-
-// 1. NGO Destination
-if (!empty($t['ngo_lat']) && !empty($t['ngo_lng']) && $t['ngo_lat'] != 0 && $t['ngo_lng'] != 0) {
-    $ngoDest = $t['ngo_lat'] . ',' . $t['ngo_lng'];
-} else {
-    // Fallback to complete textual profile address
-    $ngoDest = trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city'] . ' ' . $t['ngo_pincode']);
-}
+// ---- SMART MAP LINK GENERATION ----
+$ngoDest = (!empty($t['ngo_lat']) && $t['ngo_lat'] != 0) ? $t['ngo_lat'].','.$t['ngo_lng'] : trim($t['ngo_address'] . ', ' . $t['ngo_area'] . ', ' . $t['ngo_city'] . ' ' . $t['ngo_pincode']);
 $ngoMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($ngoDest) . '&travelmode=driving';
 
-// 2. Recipient Destination
-if (!empty($t['r_lat']) && !empty($t['r_lng']) && $t['r_lat'] != 0 && $t['r_lng'] != 0) {
-    $recDest = $t['r_lat'] . ',' . $t['r_lng'];
-} else {
-    // Fallback to complete textual profile address
-    $recDest = trim($t['r_address'] . ', ' . $t['r_area'] . ', ' . $t['r_city'] . ' ' . $t['r_pincode']);
-}
+$recDest = (!empty($t['r_lat']) && $t['r_lat'] != 0) ? $t['r_lat'].','.$t['r_lng'] : trim($t['r_address'] . ', ' . $t['r_area'] . ', ' . $t['r_city'] . ' ' . $t['r_pincode']);
 $recipientMapUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . urlencode($recDest) . '&travelmode=driving';
 
 // ---------------------------------
@@ -103,7 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ")->execute([':d' => $t['donation_id'], ':r' => $t['request_id'], ':del' => $deliveryId, ':u' => $uid, ':img' => $proof, ':note' => post('delivery_note')]);
 
                 $pdo->prepare("UPDATE collector_tasks SET status='delivered', delivery_time=NOW() WHERE task_id=:t")->execute([':t' => $taskId]);
-                $pdo->prepare("UPDATE food_requests SET status='completed' WHERE request_id=:r")->execute([':r' => $t['request_id']]);
+                $pdo->prepare("UPDATE food_requests SET status='accepted' WHERE request_id=:r")->execute([':r' => $t['request_id']]);
 
                 $pdo->commit();
 
@@ -127,7 +114,7 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     <div class="toast toast-error"><?php foreach ($errors as $e): ?><?= sanitize($e) ?><br><?php endforeach; ?></div>
 <?php endif; ?>
 
-<!-- PICKUP CARD (NGO Profile) -->
+<!-- PICKUP CARD -->
 <div class="card mb-3">
     <div class="flex-between mb-2">
         <h2><?= sanitize($t['food_name']) ?></h2>
@@ -138,7 +125,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <div>
             <h4>🏢 Pickup From (NGO)</h4>
             <p><strong><?= sanitize($t['ngo_name']) ?></strong> (<?= sanitize($t['ngo_phone']) ?>)</p>
-            <!-- Use NGO Profile Address -->
             <p><?= sanitize($t['ngo_address']) ?>, <?= sanitize($t['ngo_area']) ?>, <?= sanitize($t['ngo_city']) ?> - <?= sanitize($t['ngo_pincode']) ?></p>
             
             <?php if (in_array($t['status'], ['accepted', 'pickup_started'])): ?>
@@ -148,12 +134,11 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 </div>
 
-<!-- DELIVERY CARD (Recipient Profile) -->
+<!-- DELIVERY CARD -->
 <?php if (in_array($t['status'], ['picked_up', 'delivering', 'awaiting_proof'])): ?>
 <div class="card mb-3" style="border-left:4px solid var(--green); background:#F1F8E9">
     <h4>🏁 Deliver To (Recipient)</h4>
     <p><strong><?= sanitize($t['recipient_name']) ?></strong> (<?= sanitize($t['recipient_phone']) ?>)</p>
-    <!-- Use Recipient Profile Address -->
     <p><?= sanitize($t['r_address']) ?>, <?= sanitize($t['r_area']) ?>, <?= sanitize($t['r_city']) ?> - <?= sanitize($t['r_pincode']) ?></p>
     
     <a href="<?= $recipientMapUrl ?>" target="_blank" class="btn btn-primary btn-sm mt-2">🧭 Navigate to Recipient</a>
@@ -172,14 +157,15 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
-<!-- UPLOAD PROOF FORM -->
-<?php if (in_array($t['status'], ['delivering', 'awaiting_proof'], true)): ?>
+<!-- UPLOAD PROOF FORM (Only shows when status is exactly 'awaiting_proof') -->
+<?php if ($t['status'] === 'awaiting_proof'): ?>
     <div class="card">
         <h3 class="card-title">📷 Upload Delivery Proof</h3>
         <form method="post" enctype="multipart/form-data">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="upload_proof">
             <div class="form-group">
+                <label class="form-label">Proof Photo *</label>
                 <input type="file" name="proof_image" class="form-control" required accept="image/jpeg,image/png,image/webp">
             </div>
             <div class="form-group">
