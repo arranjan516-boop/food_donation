@@ -120,7 +120,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
         <div>
             <h4>🏢 Pickup From (NGO)</h4>
             <p><strong><?= sanitize($t['ngo_name']) ?></strong> (<?= sanitize($t['ngo_phone']) ?>)</p>
-            <!-- Text Address Only -->
             <p style="font-size: 15px; color: var(--gray-700);"><?= sanitize($ngoFullAddress) ?></p>
         </div>
     </div>
@@ -131,7 +130,6 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
 <div class="card mb-3" style="border-left:4px solid var(--green); background:#F1F8E9">
     <h4>🏁 Deliver To (Recipient)</h4>
     <p><strong><?= sanitize($t['recipient_name']) ?></strong> (<?= sanitize($t['recipient_phone']) ?>)</p>
-    <!-- Text Address Only -->
     <p style="font-size: 15px; color: var(--green-dark); font-weight: 500;"><?= sanitize($recFullAddress) ?></p>
 </div>
 <?php endif; ?>
@@ -148,8 +146,8 @@ require_once __DIR__ . '/../includes/dashboard-header.php';
     </div>
 <?php endif; ?>
 
-<!-- UPLOAD PROOF FORM -->
-<?php if (in_array($t['status'], ['delivering', 'awaiting_proof'])): ?>
+<!-- UPLOAD PROOF FORM (Only shows when status is exactly 'awaiting_proof') -->
+<?php if ($t['status'] === 'awaiting_proof'): ?>
     <div class="card">
         <h3 class="card-title">📷 Upload Delivery Proof</h3>
         <form method="post" enctype="multipart/form-data">
