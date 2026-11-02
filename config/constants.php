@@ -6,7 +6,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 // ---- Site ----
 define('SITE_NAME', 'FoodShare');
-define('BASE_URL',  'http://fooddonation.wuaze.com/');
+define('BASE_URL',  'http://localhost/food_donation/');
 
 // ---- Filesystem paths ----
 define('ROOT_PATH',      dirname(__DIR__) . DIRECTORY_SEPARATOR);
